@@ -205,7 +205,7 @@ namespace SmashNxTools
     public struct StreamIndexToHashTab
     {
         public Hash Hash;
-        public Int24 SongIndex;
+        public Int24 StreamIndex;
         public int Field8;
     }
 

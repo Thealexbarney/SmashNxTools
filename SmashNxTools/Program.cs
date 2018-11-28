@@ -27,8 +27,8 @@ namespace SmashNxTools
 
                 Hash.LoadHashes("hashstrings.txt");
                 var archive = new Archive(file);
-                Console.WriteLine("Extracting BGM");
-                archive.ExtractBgm("bgm");
+                Console.WriteLine("Extracting Streams");
+                archive.ExtractBgm("streams");
                 Console.WriteLine("Dumping tables");
                 archive.Print("tables");
                 return;

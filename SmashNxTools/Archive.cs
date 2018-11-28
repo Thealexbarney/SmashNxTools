@@ -72,11 +72,19 @@ namespace SmashNxTools
 
         public void ExtractBgm(string dir)
         {
-            for (int i = 0; i < 0x618; i++)
+            for (int i = 0; i < 0x980; i++)
             {
-                var name = Table20.StreamIndexToHash[i].Hash.GetText().Replace("stream:/", "");
-                var fileIndex = Table20.StreamIndexToFile[i].FileIndex;
+                var name = Table20.StreamIndexToHash[i].Hash.GetText();
+                var streamIndex = Table20.StreamIndexToHash[i].StreamIndex.GetInt();
+                var fileIndex = Table20.StreamIndexToFile[streamIndex].FileIndex;
                 var fileInfo = Table20.StreamFiles[fileIndex];
+                if (name == null)
+                {
+                    name = fileIndex.ToString("D4");
+                    if (fileIndex > 0x92a) name += ".webm";
+                }
+                name = name.Replace("stream:/", "");
+                
                 var path = Path.Combine(dir, name);
 
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
@@ -149,6 +157,11 @@ namespace SmashNxTools
             }
 
             return table.Print();
+        }
+
+        public void RemoveBadHashes()
+        {
+
         }
 
         public static uint Crc32(string input)
@@ -285,6 +298,11 @@ namespace SmashNxTools
         {
             int val = (C << 16) | (B << 8) | A;
             return val.ToString("X6");
+        }
+
+        public int GetInt()
+        {
+            return (C << 16) | (B << 8) | A;
         }
     }
 
