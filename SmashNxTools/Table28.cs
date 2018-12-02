@@ -1,71 +1,103 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
-using System.Runtime.InteropServices;
+using System.Linq;
 
 namespace SmashNxTools
 {
     public class Table28
     {
-        public byte[] Data { get; set; }
         public Table28Header Header { get; set; }
 
-        public DirectoryHashToIndexTable[] DirectoryHashToIndex { get; set; }
-        public DirectoryChildrenTable[] DirectoryChildren { get; set; }
-        public Tab28F10A[] Field10A { get; set; }
+        public DirectoryListLookupTab2[] DirectoryListLookup { get; set; }
+        public DirectoryListTab2[] DirectoryList { get; set; }
+        public EntryListLookupTab[] EntryListLookup { get; set; }
         public Tab28F0C[] Field0C { get; set; }
-        public Tab28F10B[] Field10B { get; set; }
+        public EntryListTab[] EntryList { get; set; }
 
         public Table28(BinaryReader reader)
         {
-            long start = reader.BaseStream.Position;
-
             Header = new Table28Header(reader);
 
-            reader.BaseStream.Position = start;
-            Data = reader.ReadBytes(Header.Length);
+            DirectoryListLookup = new DirectoryListLookupTab2[Header.DirectoryCount];
+            for (int i = 0; i < Header.DirectoryCount; i++)
+            {
+                DirectoryListLookup[i] = new DirectoryListLookupTab2(reader);
+            }
 
-            int pos = 0x14;
+            DirectoryList = new DirectoryListTab2[Header.DirectoryCount];
+            for (int i = 0; i < Header.DirectoryCount; i++)
+            {
+                DirectoryList[i] = new DirectoryListTab2(reader);
+            }
 
-            DirectoryHashToIndex = MemoryMarshal.Cast<byte, DirectoryHashToIndexTable>(Data.AsSpan(pos)).Slice(0, Header.Field8).ToArray();
-            pos += DirectoryHashToIndex.Length * Marshal.SizeOf<DirectoryHashToIndexTable>();
+            EntryListLookup = new EntryListLookupTab[Header.EntryCount];
+            for (int i = 0; i < Header.EntryCount; i++)
+            {
+                EntryListLookup[i] = new EntryListLookupTab(reader);
+            }
 
-            DirectoryChildren = MemoryMarshal.Cast<byte, DirectoryChildrenTable>(Data.AsSpan(pos)).Slice(0, Header.Field8).ToArray();
-            pos += DirectoryChildren.Length * Marshal.SizeOf<DirectoryChildrenTable>();
+            Field0C = new Tab28F0C[Header.FieldC];
+            for (int i = 0; i < Header.FieldC; i++)
+            {
+                Field0C[i] = new Tab28F0C(reader);
+            }
 
-            Field10A = MemoryMarshal.Cast<byte, Tab28F10A>(Data.AsSpan(pos)).Slice(0, Header.Field10).ToArray();
-            pos += Field10A.Length * Marshal.SizeOf<Tab28F10A>();
-
-            Field0C = MemoryMarshal.Cast<byte, Tab28F0C>(Data.AsSpan(pos)).Slice(0, Header.FieldC).ToArray();
-            pos += Field0C.Length * Marshal.SizeOf<Tab28F0C>();
-
-            Field10B = MemoryMarshal.Cast<byte, Tab28F10B>(Data.AsSpan(pos)).Slice(0, Header.Field10).ToArray();
+            EntryList = new EntryListTab[Header.EntryCount];
+            for (int i = 0; i < Header.EntryCount; i++)
+            {
+                EntryList[i] = new EntryListTab(reader);
+            }
 
             HashSet<long> hashes = Hash.Hashes;
 
-            foreach (var item in DirectoryHashToIndex)
+            foreach (var item in DirectoryListLookup)
             {
                 hashes.Add(item.Hash.GetHash());
             }
 
-            foreach (var item in DirectoryChildren)
+            foreach (var item in DirectoryList)
             {
                 hashes.Add(item.Path.GetHash());
-                hashes.Add(item.ParentDir.GetHash());
+                hashes.Add(item.Parent.GetHash());
                 hashes.Add(item.Name.GetHash());
             }
 
-            foreach (var item in Field10A)
+            foreach (var item in EntryListLookup)
             {
                 hashes.Add(item.Hash.GetHash());
             }
 
-            foreach (var item in Field10B)
+            foreach (var item in EntryList)
             {
                 hashes.Add(item.Path.GetHash());
-                hashes.Add(item.ParentDirectory.GetHash());
+                hashes.Add(item.Parent.GetHash());
                 hashes.Add(item.Name.GetHash());
                 hashes.Add(item.Extension.GetHash());
+            }
+
+            SetReferences();
+        }
+
+        public void SetReferences()
+        {
+            foreach (var item in DirectoryListLookup)
+            {
+                item.Directory = DirectoryList[item.DirectoryIndex.Value];
+            }
+
+            foreach (var item in DirectoryList)
+            {
+                item.FirstEntry = EntryList[item.EntryStartIndex];
+            }
+
+            foreach (var item in EntryListLookup)
+            {
+                item.Entry = EntryList[item.EntryIndex.Value];
+            }
+
+            foreach (var item in EntryList.Where(x => x.NextSiblingIndex.Value != 0xFFFFFF))
+            {
+                item.NextSibling = EntryList[item.NextSiblingIndex.Value];
             }
         }
     }
@@ -74,46 +106,65 @@ namespace SmashNxTools
     {
         public int Length { get; set; }
         public int Field4 { get; set; }
-        public int Field8 { get; set; }
+        public int DirectoryCount { get; set; }
         public int FieldC { get; set; }
-        public int Field10 { get; set; }
+        public int EntryCount { get; set; }
 
         public Table28Header(BinaryReader reader)
         {
             Length = reader.ReadInt32();
             Field4 = reader.ReadInt32();
-            Field8 = reader.ReadInt32();
+            DirectoryCount = reader.ReadInt32();
             FieldC = reader.ReadInt32();
-            Field10 = reader.ReadInt32();
+            EntryCount = reader.ReadInt32();
         }
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct DirectoryHashToIndexTable
+    public class DirectoryListLookupTab2
     {
         public Hash Hash;
-        public Int24 Field5;
+        public Int24 DirectoryIndex;
+
+        public DirectoryListTab2 Directory { get; set; }
+
+        public DirectoryListLookupTab2(BinaryReader reader)
+        {
+            Hash = new Hash(reader);
+            DirectoryIndex = new Int24(reader);
+        }
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct DirectoryChildrenTable
+    public class DirectoryListTab2
     {
         public Hash Path;
         public Int24 ChildDirCount;
-        public Hash ParentDir;
+        public Hash Parent;
         public Int24 ChildFileCount;
         public Hash Name;
-        public Int24 Field15;
         public int EntryStartIndex;
         public int EntryCount;
-        
+
+        public EntryListTab FirstEntry { get; set; }
+
+        public DirectoryListTab2(BinaryReader reader)
+        {
+            Path = new Hash(reader);
+            ChildDirCount = new Int24(reader);
+            Parent = new Hash(reader);
+            ChildFileCount = new Int24(reader);
+            Name = new Hash(reader);
+            reader.BaseStream.Position += 3;
+            EntryStartIndex = reader.ReadInt32();
+            EntryCount = reader.ReadInt32();
+        }
+
         public void AddFullHash()
         {
             if (Path.GetText() != null) return;
 
             string full = "";
 
-            if (!AddField(ParentDir)) return;
+            if (!AddField(Parent)) return;
             if (!AddField(Name)) return;
 
             Hash.AddHashIfExists(full);
@@ -132,29 +183,52 @@ namespace SmashNxTools
         }
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct Tab28F10A
+    public class EntryListLookupTab
     {
         public Hash Hash;
-        public Int24 Field5;
+        public Int24 EntryIndex;
+
+        public EntryListTab Entry { get; set; }
+
+        public EntryListLookupTab(BinaryReader reader)
+        {
+            Hash = new Hash(reader);
+            EntryIndex = new Int24(reader);
+        }
     }
 
-    public struct Tab28F0C
+    public class Tab28F0C
     {
         public int Field0;
+
+        public Tab28F0C(BinaryReader reader)
+        {
+            Field0 = reader.ReadInt32();
+        }
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct Tab28F10B
+    public class EntryListTab
     {
         public Hash Path;
-        public Int24 NextSibling;
-        public Hash ParentDirectory;
+        public Int24 NextSiblingIndex;
+        public Hash Parent;
         public Int24 Type;
         public Hash Name;
-        public Int24 Field15;
         public Hash Extension;
-        public Int24 Field1D;
+
+        public EntryListTab NextSibling { get; set; }
+
+        public EntryListTab(BinaryReader reader)
+        {
+            Path = new Hash(reader);
+            NextSiblingIndex = new Int24(reader);
+            Parent = new Hash(reader);
+            Type = new Int24(reader);
+            Name = new Hash(reader);
+            reader.BaseStream.Position += 3;
+            Extension = new Hash(reader);
+            reader.BaseStream.Position += 3;
+        }
 
         public void AddFullHash()
         {
@@ -162,7 +236,7 @@ namespace SmashNxTools
 
             string full = "";
 
-            if (!AddField(ParentDirectory)) return;
+            if (!AddField(Parent)) return;
             if (!AddField(Name)) return;
 
             Hash.AddHashIfExists(full);

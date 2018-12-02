@@ -1,12 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
+using Zstandard.Net;
 
 namespace SmashNxTools
 {
-    class Program
+    static class Program
     {
         static void Main(string[] args)
         {
@@ -23,69 +24,83 @@ namespace SmashNxTools
 
             using (var file = new FileStream(args[0], FileMode.Open, FileAccess.Read, FileShare.Read))
             {
-               // string[] subs = File.ReadAllLines("sub.txt");
+                // string[] subs = File.ReadAllLines("sub.txt");
 
                 Hash.LoadHashes("hashstrings.txt");
                 var archive = new Archive(file);
-                Console.WriteLine("Extracting Streams");
-                archive.ExtractBgm("streams");
-                Console.WriteLine("Dumping tables");
-                archive.Print("tables");
-                return;
-                archive.FindFullHashes();
-                archive.FindFullHashes();
-                archive.FindFullHashes();
-                archive.FindFullHashes();
-                //archive.Extract("banks");
-                HashSet<long> hashes = Hash.Hashes;
-               // Hash.LoadDump2("dump.txt");
-               // Hash.LoadDump2("hashstrings.txt");
-                //Hash.LoadDump2("arcstrings_short.txt");
-                //Hash.LoadDump2("words.txt");
-                //ModStrings();
-                AddExtensions(archive);
-                archive.FindFullHashes();
-                archive.FindFullHashes();
-                archive.FindFullHashes();
-                archive.FindFullHashes();
-                //FindPrefix(File.ReadAllLines("manual_dump.txt"));
 
-                var timer = Stopwatch.StartNew();
-
-                for (int i = 0; i < 7; i++)
-                {
-                    //Hash.AddPerms(i, 'a', 'z');
-                    Console.WriteLine(timer.Elapsed.TotalMilliseconds);
-                }
-                timer.Stop();
-                Console.WriteLine(timer.Elapsed.TotalMilliseconds);
-
-                var totalFiles = archive.Table20.FileHashToIndex.Length;
-                var hashedFiles = archive.Table20.FileHashToIndex.Count(x => Hash.HashStrings.ContainsKey(x.Hash.GetHash()));
-
-                var totalHashes = hashes.Count;
-                var crackedHashes = hashes.Count(x => Hash.HashStrings.ContainsKey(x));
-
-
-                Console.WriteLine($"Full file path hashes: {hashedFiles} / {totalFiles} ({(double)hashedFiles / totalFiles:P2})");
-                Console.WriteLine($"All hashes: {crackedHashes} / {totalHashes} ({(double)crackedHashes / totalHashes:P2})");
-
-                Console.WriteLine("Enter to save");
-                Console.ReadLine();
-
-                DumpStrings("hashstrings.txt");
-                DumpHashes("hashes.txt");
-                DumpUnknownHashes("hashes_unk.txt");
-
-                Console.WriteLine("Enter to save tables");
-                Console.ReadLine();
-                archive.Print("tables");
+                //RemoveBadHashes(archive);
+                //FindNewStrings(archive);
+                ExtractAll(archive);
             }
         }
 
-        public static void FindBadHashes(Archive archive, string filename)
+        public static void RemoveBadHashes(Archive archive)
         {
+            archive.RemoveBadHashes();
+        }
 
+        public static void Decompress(string filename)
+        {
+            using (var file = new FileStream("comp1.bin", FileMode.Open))
+            {
+                using (var compStream = new ZstandardStream(file, CompressionMode.Decompress, true))
+                {
+                    using (var fileOut = new FileStream("comp1.bin.dec", FileMode.Create))
+                    {
+                        compStream.CopyStream(fileOut, 0xc1f0);
+                    }
+                }
+            }
+        }
+
+        public static void ExtractAll(Archive archive)
+        {
+            using (var progress = new ProgressBar())
+            {
+                archive.ExtractFiles("files", progress);
+            }
+        }
+
+        public static void FindNewStrings(Archive archive)
+        {
+            archive.FindFullHashes();
+            archive.FindFullHashes();
+            archive.FindFullHashes();
+            archive.FindFullHashes();
+            //AddExtensions(archive);
+            ModStrings();
+            archive.FindFullHashes();
+            archive.FindFullHashes();
+            archive.FindFullHashes();
+            archive.FindFullHashes();
+
+            Hash.LoadDump2("dump.txt");
+            // Hash.LoadDump2("hashstrings.txt");
+            //Hash.LoadDump2("arcstrings_short.txt");
+            //Hash.LoadDump2("words.txt");
+
+            HashSet<long> hashes = Hash.Hashes;
+
+            var totalFiles = archive.Table20.FileListLookup.Length;
+            var hashedFiles = archive.Table20.FileListLookup.Count(x => Hash.HashStrings.ContainsKey(x.Hash.GetHash()));
+
+            var totalHashes = hashes.Count;
+            var crackedHashes = hashes.Count(x => Hash.HashStrings.ContainsKey(x));
+
+            Console.WriteLine($"Full file path hashes: {hashedFiles} / {totalFiles} ({(double)hashedFiles / totalFiles:P2})");
+            Console.WriteLine($"All hashes: {crackedHashes} / {totalHashes} ({(double)crackedHashes / totalHashes:P2})");
+
+            Console.WriteLine("Enter to save");
+            Console.ReadLine();
+
+            DumpStrings("hashstrings.txt");
+            DumpHashes("hashes.txt");
+            DumpUnknownHashes("hashes_unk.txt");
+
+            Console.WriteLine("Enter to save tables");
+            Console.ReadLine();
+            archive.Print("tables2");
         }
 
         public static void ModStrings()
@@ -93,63 +108,64 @@ namespace SmashNxTools
             string[] strings = Hash.HashStrings.Values.ToArray();
             var list = new List<string>();
 
-            foreach (var str in strings)
+            foreach (string str in strings)
             {
                 list.Clear();
 
-                list.Add($"se_enemy_{str}.nus3audio");
-                list.Add($"se_enemy_{str}.tonelabel");
-                list.Add($"se_enemy_{str}.nus3bank");
-                list.Add($"sound/sequence/fighter/{str}.sqb");
-                list.Add($"sound/bank/fighter_voice/vc_Kirby_copy_{str}.nus3bank");
-                list.Add($"sound/bank/fighter_voice/vc_Kirby_copy_{str}.tonelabel");
-                list.Add($"sound/bank/fighter_voice/vc_Kirby_copy_{str}.nus3audio");
-                list.Add($"miihat/{str}");
-                list.Add($"miibody/{str}");
-                list.Add($"miivoice/{str}");
-                list.Add($"miihat/{str}/motion/body/c00/motion_list.bin");
-                list.Add($"sound/bank/fighter_voice/{str}.nus3bank");
-                list.Add($"sound/bank/fighter_voice/{str}.tonelabel");
-                list.Add($"sound/bank/fighter_voice/{str}.nus3audio");
+                //list.Add($"se_enemy_{str}.nus3audio");
+                //list.Add($"se_enemy_{str}.tonelabel");
+                //list.Add($"se_enemy_{str}.nus3bank");
+                //list.Add($"sound/sequence/fighter/{str}.sqb");
+                //list.Add($"sound/bank/fighter_voice/vc_Kirby_copy_{str}.nus3bank");
+                //list.Add($"sound/bank/fighter_voice/vc_Kirby_copy_{str}.tonelabel");
+                //list.Add($"sound/bank/fighter_voice/vc_Kirby_copy_{str}.nus3audio");
+                //list.Add($"miihat/{str}");
+                //list.Add($"miibody/{str}");
+                //list.Add($"miivoice/{str}");
+                //list.Add($"miihat/{str}/motion/body/c00/motion_list.bin");
+                //list.Add($"sound/bank/fighter_voice/{str}.nus3bank");
+                //list.Add($"sound/bank/fighter_voice/{str}.tonelabel");
+                //list.Add($"sound/bank/fighter_voice/{str}.nus3audio");
 
                 for (int i = 0; i < 9; i++)
                 {
-                    list.Add($"sound/bank/fighter/se_{str}_c{i:d2}.nus3audio");
-                    list.Add($"sound/bank/fighter/se_{str}_c{i:d2}.nus3bank");
-                    list.Add($"sound/bank/fighter/se_{str}_c{i:d2}.tonelabel");
-                    list.Add($"sound/bank/fighter_voice/vc_{str}_c{i:d2}.nus3audio");
-                    list.Add($"sound/bank/fighter_voice/vc_{str}_c{i:d2}.nus3bank");
-                    list.Add($"sound/bank/fighter_voice/vc_{str}_c{i:d2}.tonelabel");
-                    list.Add($"sound/bank/fighter_voice/vc_{str}_cheer_c{i:d2}.nus3audio");
-                    list.Add($"sound/bank/fighter_voice/vc_{str}_cheer_c{i:d2}.nus3bank");
-                    list.Add($"sound/bank/fighter_voice/vc_{str}_cheer_c{i:d2}.tonelabel");
-                    list.Add($"camera/fighter/{str}/c{i:d2}");
-                    list.Add($"{str}/c{i:d2}");
+                    //list.Add($"sound/bank/fighter/se_{str}_c{i:d2}.nus3audio");
+                    //list.Add($"sound/bank/fighter/se_{str}_c{i:d2}.nus3bank");
+                    //list.Add($"sound/bank/fighter/se_{str}_c{i:d2}.tonelabel");
+                    //list.Add($"sound/bank/fighter_voice/vc_{str}_c{i:d2}.nus3audio");
+                    //list.Add($"sound/bank/fighter_voice/vc_{str}_c{i:d2}.nus3bank");
+                    //list.Add($"sound/bank/fighter_voice/vc_{str}_c{i:d2}.tonelabel");
+                    //list.Add($"sound/bank/fighter_voice/vc_{str}_cheer_c{i:d2}.nus3audio");
+                    //list.Add($"sound/bank/fighter_voice/vc_{str}_cheer_c{i:d2}.nus3bank");
+                    //list.Add($"sound/bank/fighter_voice/vc_{str}_cheer_c{i:d2}.tonelabel");
+                    //list.Add($"camera/fighter/{str}/c{i:d2}");
+                    list.Add($"standard_route_{str}.prc");
+                    //list.Add($"{str}/c{i:d2}");
                 }
 
-                if (str.Contains("c00"))
-                {
-                    for (int i = 0; i < 8; i++)
-                    {
-                        list.Add(str.Replace("c00", $"c{i:d2}"));
-                    }
-                }
+                //if (str.Contains("c00"))
+                //{
+                //    for (int i = 0; i < 8; i++)
+                //    {
+                //        list.Add(str.Replace("c00", $"c{i:d2}"));
+                //    }
+                //}
 
-                if (str.Contains("%s"))
-                {
-                    foreach (var str2 in strings)
-                    {
-                        list.Add(str.Replace("%s", str2));
-                    }
-                }
+                //if (str.Contains("%s"))
+                //{
+                //    foreach (var str2 in strings)
+                //    {
+                //        list.Add(str.Replace("%s", str2));
+                //    }
+                //}
 
-                if (str.Contains("%02d"))
-                {
-                    for (int i = 0; i < 8; i++)
-                    {
-                        list.Add(str.Replace("%02d", $"{i:d2}"));
-                    }
-                }
+                //if (str.Contains("%02d"))
+                //{
+                //    for (int i = 0; i < 8; i++)
+                //    {
+                //        list.Add(str.Replace("%02d", $"{i:d2}"));
+                //    }
+                //}
 
                 foreach (var item in list)
                 {
@@ -177,7 +193,7 @@ namespace SmashNxTools
             Console.WriteLine("Doing extensions");
             string[] strings = Hash.HashStrings.Values.ToArray();
 
-            string[] extensions = archive.Table20.FilePathCombine.Select(x => x.Extension.GetText()).Where(x => x != null).Distinct().ToArray();
+            string[] extensions = archive.Table20.FileList.Select(x => x.Extension.GetText()).Where(x => x != null).Distinct().ToArray();
 
             foreach (var str in strings)
             {

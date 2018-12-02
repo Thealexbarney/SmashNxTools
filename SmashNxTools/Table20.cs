@@ -1,89 +1,124 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
-using System.Runtime.InteropServices;
 
 namespace SmashNxTools
 {
     public class Table20
     {
-        public byte[] Data { get; set; }
         public Table20Header Header { get; set; }
 
         public StreamRootTable[] StreamRoot { get; set; }
-        public StreamHashToIndexTab[] StreamHashToIndex { get; set; }
-        public StreamIndexToHashTab[] StreamIndexToHash { get; set; }
+        public StreamHashToNameIndexTab[] StreamHashToNameIndex { get; set; }
+        public StreamNameIndexTab[] StreamNameIndexToHash { get; set; }
         public StreamIndexToFileTab[] StreamIndexToFile { get; set; }
         public StreamFilesTab[] StreamFiles { get; set; }
         public Tab20F30[] Field30 { get; set; }
-        public Tab20F04A[] Field04A { get; set; }
-        public Tab20F20[] Field20 { get; set; }
+        public DirectoryListTab[] DirectoryList { get; set; }
+        public DirectoryOffsetTable[] DirectoryOffsets { get; set; }
         public Tab20F18[] Field18 { get; set; }
-        public FilePathCombineTab[] FilePathCombine { get; set; }
-        public Tab20F24[] Field24 { get; set; }
-        public Tab20F04B[] Field04B { get; set; }
+        public FileListTab[] FileList { get; set; }
+        public FileOffsetTab[] FileOffsets { get; set; }
+        public DirectoryListLookupTab[] DirectoryListLookup { get; set; }
         public Tab20Fxx[] FieldXX { get; set; }
-        public FileHashToIndexTab[] FileHashToIndex { get; set; }
+        public FileListLookupTab[] FileListLookup { get; set; }
         public Tab20F0CB[] Field0CB { get; set; }
 
         public Table20(BinaryReader reader)
         {
-            long start = reader.BaseStream.Position;
-
             Header = new Table20Header(reader);
 
-            reader.BaseStream.Position = start;
-            Data = reader.ReadBytes(Header.Length);
+            StreamRoot = new StreamRootTable[Header.Field34];
+            for (int i = 0; i < Header.Field34; i++)
+            {
+                StreamRoot[i] = new StreamRootTable(reader);
+            }
 
-            int pos = 0x44;
+            StreamHashToNameIndex = new StreamHashToNameIndexTab[Header.Field38];
+            for (int i = 0; i < Header.Field38; i++)
+            {
+                StreamHashToNameIndex[i] = new StreamHashToNameIndexTab(reader);
+            }
 
-            StreamRoot = MemoryMarshal.Cast<byte, StreamRootTable>(Data.AsSpan(pos)).Slice(0, Header.Field34).ToArray();
-            pos += StreamRoot.Length * Marshal.SizeOf<StreamRootTable>();
+            StreamNameIndexToHash = new StreamNameIndexTab[Header.Field38];
+            for (int i = 0; i < Header.Field38; i++)
+            {
+                StreamNameIndexToHash[i] = new StreamNameIndexTab(reader);
+            }
 
-            StreamHashToIndex = MemoryMarshal.Cast<byte, StreamHashToIndexTab>(Data.AsSpan(pos)).Slice(0, Header.Field38).ToArray();
-            pos += StreamHashToIndex.Length * Marshal.SizeOf<StreamHashToIndexTab>();
+            StreamIndexToFile = new StreamIndexToFileTab[Header.Field3C];
+            for (int i = 0; i < Header.Field3C; i++)
+            {
+                StreamIndexToFile[i] = new StreamIndexToFileTab(reader);
+            }
 
-            StreamIndexToHash = MemoryMarshal.Cast<byte, StreamIndexToHashTab>(Data.AsSpan(pos)).Slice(0, Header.Field38).ToArray();
-            pos += StreamIndexToHash.Length * Marshal.SizeOf<StreamIndexToHashTab>();
+            StreamFiles = new StreamFilesTab[Header.StreamFileCount];
+            for (int i = 0; i < Header.StreamFileCount; i++)
+            {
+                StreamFiles[i] = new StreamFilesTab(reader);
+            }
 
-            StreamIndexToFile = MemoryMarshal.Cast<byte, StreamIndexToFileTab>(Data.AsSpan(pos)).Slice(0, Header.Field3C).ToArray();
-            pos += StreamIndexToFile.Length * Marshal.SizeOf<StreamIndexToFileTab>();
+            Field30 = new Tab20F30[Header.Field30];
+            for (int i = 0; i < Header.Field30; i++)
+            {
+                Field30[i] = new Tab20F30(reader);
+            }
 
-            StreamFiles = MemoryMarshal.Cast<byte, StreamFilesTab>(Data.AsSpan(pos)).Slice(0, Header.StreamFileCount).ToArray();
-            pos += StreamFiles.Length * Marshal.SizeOf<StreamFilesTab>();
+            DirectoryList = new DirectoryListTab[Header.Field4];
+            for (int i = 0; i < Header.Field4; i++)
+            {
+                DirectoryList[i] = new DirectoryListTab(reader, i);
+            }
 
-            Field30 = MemoryMarshal.Cast<byte, Tab20F30>(Data.AsSpan(pos)).Slice(0, Header.Field30).ToArray();
-            pos += Field30.Length * Marshal.SizeOf<Tab20F30>();
+            DirectoryOffsets = new DirectoryOffsetTable[Header.Field20 + Header.Field8];
+            for (int i = 0; i < Header.Field20 + Header.Field8; i++)
+            {
+                DirectoryOffsets[i] = new DirectoryOffsetTable(reader, i);
+            }
 
-            Field04A = MemoryMarshal.Cast<byte, Tab20F04A>(Data.AsSpan(pos)).Slice(0, Header.Field4).ToArray();
-            pos += Field04A.Length * Marshal.SizeOf<Tab20F04A>();
+            Field18 = new Tab20F18[Header.Field18];
+            for (int i = 0; i < Header.Field18; i++)
+            {
+                Field18[i] = new Tab20F18(reader);
+            }
 
-            Field20 = MemoryMarshal.Cast<byte, Tab20F20>(Data.AsSpan(pos)).Slice(0, Header.Field20 + Header.Field8).ToArray();
-            pos += Field20.Length * Marshal.SizeOf<Tab20F20>();
+            FileList = new FileListTab[Header.FieldC];
+            for (int i = 0; i < Header.FieldC; i++)
+            {
+                FileList[i] = new FileListTab(reader, i);
+            }
 
-            Field18 = MemoryMarshal.Cast<byte, Tab20F18>(Data.AsSpan(pos)).Slice(0, Header.Field18).ToArray();
-            pos += Field18.Length * Marshal.SizeOf<Tab20F18>();
+            FileOffsets = new FileOffsetTab[Header.Field24 + Header.Field10];
+            for (int i = 0; i < Header.Field24 + Header.Field10; i++)
+            {
+                FileOffsets[i] = new FileOffsetTab(reader, i);
+            }
 
-            FilePathCombine = MemoryMarshal.Cast<byte, FilePathCombineTab>(Data.AsSpan(pos)).Slice(0, Header.FieldC).ToArray();
-            pos += FilePathCombine.Length * Marshal.SizeOf<FilePathCombineTab>();
+            DirectoryListLookup = new DirectoryListLookupTab[Header.Field4];
+            for (int i = 0; i < Header.Field4; i++)
+            {
+                DirectoryListLookup[i] = new DirectoryListLookupTab(reader, i);
+            }
 
-            Field24 = MemoryMarshal.Cast<byte, Tab20F24>(Data.AsSpan(pos)).Slice(0, Header.Field24 + Header.Field10).ToArray();
-            pos += Field24.Length * Marshal.SizeOf<Tab20F24>();
+            int fileCount = reader.ReadInt32();
+            int groupCount = reader.ReadInt32();
 
-            Field04B = MemoryMarshal.Cast<byte, Tab20F04B>(Data.AsSpan(pos)).Slice(0, Header.Field4).ToArray();
-            pos += Field04B.Length * Marshal.SizeOf<Tab20F04B>();
+            FieldXX = new Tab20Fxx[groupCount];
+            for (int i = 0; i < groupCount; i++)
+            {
+                FieldXX[i] = new Tab20Fxx(reader);
+            }
 
-            int fileCount = BitConverter.ToInt32(Data, pos);
-            int groupCount = BitConverter.ToInt32(Data, pos + 4);
-            pos += 8;
+            FileListLookup = new FileListLookupTab[Header.Field14];
+            for (int i = 0; i < Header.Field14; i++)
+            {
+                FileListLookup[i] = new FileListLookupTab(reader, i);
+            }
 
-            FieldXX = MemoryMarshal.Cast<byte, Tab20Fxx>(Data.AsSpan(pos)).Slice(0, groupCount).ToArray();
-            pos += FieldXX.Length * Marshal.SizeOf<Tab20Fxx>();
-
-            FileHashToIndex = MemoryMarshal.Cast<byte, FileHashToIndexTab>(Data.AsSpan(pos)).Slice(0, Header.Field14).ToArray();
-            pos += FileHashToIndex.Length * Marshal.SizeOf<FileHashToIndexTab>();
-
-            Field0CB = MemoryMarshal.Cast<byte, Tab20F0CB>(Data.AsSpan(pos)).Slice(0, Header.FieldC).ToArray();
+            Field0CB = new Tab20F0CB[Header.FieldC];
+            for (int i = 0; i < Header.FieldC; i++)
+            {
+                Field0CB[i] = new Tab20F0CB(reader);
+            }
 
             HashSet<long> hashes = Hash.Hashes;
 
@@ -92,12 +127,12 @@ namespace SmashNxTools
                 hashes.Add(item.Hash.GetHash());
             }
 
-            foreach (var item in StreamHashToIndex)
+            foreach (var item in StreamHashToNameIndex)
             {
                 hashes.Add(item.Hash.GetHash());
             }
 
-            foreach (var item in StreamIndexToHash)
+            foreach (var item in StreamNameIndexToHash)
             {
                 hashes.Add(item.Hash.GetHash());
             }
@@ -107,7 +142,7 @@ namespace SmashNxTools
                 hashes.Add(item.Hash.GetHash());
             }
 
-            foreach (var item in Field04A)
+            foreach (var item in DirectoryList)
             {
                 hashes.Add(item.Path.GetHash());
                 hashes.Add(item.Name.GetHash());
@@ -120,7 +155,7 @@ namespace SmashNxTools
                 hashes.Add(item.Hash.GetHash());
             }
 
-            foreach (var item in FilePathCombine)
+            foreach (var item in FileList)
             {
                 hashes.Add(item.Path.GetHash());
                 hashes.Add(item.Extension.GetHash());
@@ -128,14 +163,70 @@ namespace SmashNxTools
                 hashes.Add(item.Name.GetHash());
             }
 
-            foreach (var item in Field04B)
+            foreach (var item in DirectoryListLookup)
             {
                 hashes.Add(item.Hash.GetHash());
             }
 
-            foreach (var item in FileHashToIndex)
+            foreach (var item in FileListLookup)
             {
                 hashes.Add(item.Hash.GetHash());
+            }
+
+            SetReferences();
+        }
+
+        public void SetReferences()
+        {
+            foreach (var item in StreamNameIndexToHash)
+            {
+                item.Stream = StreamIndexToFile[item.StreamIndex.Value];
+            }
+
+            foreach (var item in StreamIndexToFile)
+            {
+                item.File = StreamFiles[item.FileIndex];
+            }
+
+            foreach (var item in StreamHashToNameIndex)
+            {
+                item.Name = StreamNameIndexToHash[item.NameIndex.Value];
+            }
+
+            foreach (var item in FileList)
+            {
+                item.Directory = DirectoryList[item.DirectoryIndex.Value];
+                item.FileOffset = FileOffsets[item.OffsetIndex];
+            }
+
+            foreach (var item in FileListLookup)
+            {
+                item.FileInfo = FileList[item.FileIndex.Value];
+            }
+
+            foreach (var item in DirectoryList)
+            {
+                item.DirOffset = DirectoryOffsets[item.DirOffsetIndex.Value];
+                item.FirstFile = FileList[item.FirstFileIndex];
+            }
+
+            foreach (var item in FileOffsets)
+            {
+                if(item.Flag3)
+                {
+                    if (Header.Field10 + item.LinkFileIndex.Value < FileOffsets.Length)
+                    {
+                        item.LinkedOffset = FileOffsets[Header.Field10 + item.LinkFileIndex.Value];
+                    }
+                    continue;
+                }
+
+                item.File = FileList[item.LinkFileIndex.Value];
+            }
+
+            foreach (var item in DirectoryOffsets)
+            {
+                if (item.Field18 != 0xFFFFFF) item.LinkOffsetTable = DirectoryOffsets[item.Field18];
             }
         }
     }
@@ -186,65 +277,123 @@ namespace SmashNxTools
         }
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct StreamRootTable
+    public class StreamRootTable
     {
         public Hash Hash;
         public Int24 Length;
         public int Start;
+
+        public StreamRootTable(BinaryReader reader)
+        {
+            Hash = new Hash(reader);
+            Length = new Int24(reader);
+            Start = reader.ReadInt32();
+        }
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct StreamHashToIndexTab
+    public class StreamHashToNameIndexTab
     {
         public Hash Hash;
-        public Int24 StreamIndex;
+        public Int24 NameIndex;
+
+        public StreamNameIndexTab Name { get; set; }
+
+        public StreamHashToNameIndexTab(BinaryReader reader)
+        {
+            Hash = new Hash(reader);
+            NameIndex = new Int24(reader);
+        }
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct StreamIndexToHashTab
+    public class StreamNameIndexTab
     {
         public Hash Hash;
         public Int24 StreamIndex;
         public int Field8;
+
+        public StreamIndexToFileTab Stream { get; set; }
+
+        public StreamNameIndexTab(BinaryReader reader)
+        {
+            Hash = new Hash(reader);
+            StreamIndex = new Int24(reader);
+            Field8 = reader.ReadInt32();
+        }
     }
 
-    public struct StreamIndexToFileTab
+    public class StreamIndexToFileTab
     {
         public int FileIndex;
+        public StreamFilesTab File { get; set; }
+
+        public StreamIndexToFileTab(BinaryReader reader)
+        {
+            FileIndex = reader.ReadInt32();
+        }
     }
 
-    public struct StreamFilesTab
+    public class StreamFilesTab
     {
         public long Size;
         public long Offset;
+
+        public StreamFilesTab(BinaryReader reader)
+        {
+            Size = reader.ReadInt64();
+            Offset = reader.ReadInt64();
+        }
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct Tab20F30
+    public class Tab20F30
     {
         public int Field0;
         public Hash Hash;
         public Int24 Field9;
+
+        public Tab20F30(BinaryReader reader)
+        {
+            Field0 = reader.ReadInt32();
+            Hash = new Hash(reader);
+            Field9 = new Int24(reader);
+        }
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct Tab20F04A
+    public class DirectoryListTab
     {
         public Hash Path;
-        public Int24 Field5;
+        public Int24 DirOffsetIndex;
         public Hash Name;
-        public Int24 FieldD;
         public Hash Parent;
-        public Int24 Field15;
         public Hash Hash4;
-        public Int24 Field1D;
-        public int Field20;
+        public int FirstFileIndex;
         public int Field24;
         public int Field28;
         public short Field2C;
         public short Field2E;
         public int Field30;
+
+        public int Index { get; }
+        public DirectoryOffsetTable DirOffset { get; set; }
+        public FileListTab FirstFile { get; set; }
+
+        public DirectoryListTab(BinaryReader reader, int index)
+        {
+            Path = new Hash(reader);
+            DirOffsetIndex = new Int24(reader);
+            Name = new Hash(reader);
+            reader.BaseStream.Position += 3;
+            Parent = new Hash(reader);
+            reader.BaseStream.Position += 3;
+            Hash4 = new Hash(reader);
+            reader.BaseStream.Position += 3;
+            FirstFileIndex = reader.ReadInt32();
+            Field24 = reader.ReadInt32();
+            Field28 = reader.ReadInt32();
+            Field2C = reader.ReadInt16();
+            Field2E = reader.ReadInt16();
+            Field30 = reader.ReadInt32();
+            Index = index;
+        }
 
         public void AddFullHash()
         {
@@ -252,7 +401,6 @@ namespace SmashNxTools
 
             string full = "";
 
-            if (!AddField(Hash4)) return;
             if (!AddField(Parent)) return;
             if (!AddField(Name)) return;
 
@@ -272,37 +420,83 @@ namespace SmashNxTools
         }
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct Tab20F20
+    public class DirectoryOffsetTable
     {
         public long Offset;
-        public int Field8;
-        public int FieldC;
-        public int Field10;
+        public int Size;
+        public int SizeCompressed;
+        public int FirstFileIndex;
         public int Field14;
         public int Field18;
+
+        public int Index { get; }
+        public DirectoryOffsetTable LinkOffsetTable { get; set; }
+
+        public DirectoryOffsetTable(BinaryReader reader, int index)
+        {
+            Offset = reader.ReadInt64();
+            Size = reader.ReadInt32();
+            SizeCompressed = reader.ReadInt32();
+            FirstFileIndex = reader.ReadInt32();
+            Field14 = reader.ReadInt32();
+            Field18 = reader.ReadInt32();
+            Index = index;
+        }
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct Tab20F18
+    public class Tab20F18
     {
         public Hash Hash;
         public Int24 Field5;
+
+        public Tab20F18(BinaryReader reader)
+        {
+            Hash = new Hash(reader);
+            Field5 = new Int24(reader);
+        }
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct FilePathCombineTab
+    public class FileListTab
     {
         public Hash Path;
-        public Int24 Field5;
+        public Int24 DirectoryIndex;
         public Hash Extension;
         public Int24 FieldD;
         public Hash Parent;
-        public Int24 Field15;
         public Hash Name;
-        public Int24 Field1D;
-        public int Field20;
-        public int Field24;
+        public int OffsetIndex;
+        public int Flags;
+
+        public bool Flag1;
+        public bool Flag9;
+        public bool Flag17;
+        public bool IsLink;
+        public bool Flag21;
+
+        public int Index { get; }
+        public DirectoryListTab Directory { get; set; }
+        public FileOffsetTab FileOffset { get; set; }
+
+        public FileListTab(BinaryReader reader, int index)
+        {
+            Path = new Hash(reader);
+            DirectoryIndex = new Int24(reader);
+            Extension = new Hash(reader);
+            FieldD = new Int24(reader);
+            Parent = new Hash(reader);
+            reader.BaseStream.Position += 3;
+            Name = new Hash(reader);
+            reader.BaseStream.Position += 3;
+            OffsetIndex = reader.ReadInt32();
+            Flags = reader.ReadInt32();
+
+            Flag1 = (Flags & 2) != 0;
+            Flag9 = (Flags & 0x200) != 0;
+            Flag17 = (Flags & 0x20000) != 0;
+            IsLink = (Flags & 0x100000) != 0;
+            Flag21 = (Flags & 0x200000) != 0;
+            Index = index;
+        }
 
         public void AddFullHash()
         {
@@ -330,37 +524,92 @@ namespace SmashNxTools
         }
     }
 
-    public struct Tab20F24
+    public class FileOffsetTab
     {
-        public int Field0;
-        public int Field4;
-        public int Field8;
-        public int FieldC;
+        public int Offset;
+        public int SizeCompressed;
+        public int Size;
+        public Int24 LinkFileIndex;
+        public byte Flags;
+
+        public bool IsCompressed;
+        public bool Flag3;
+        public bool Flag4;
+        public bool Flag5;
+        public bool Flag6;
+
+        public int Index { get; }
+        public FileListTab File { get; set; }
+        public FileOffsetTab LinkedOffset { get; set; }
+
+        public FileOffsetTab(BinaryReader reader, int index)
+        {
+            Offset = reader.ReadInt32();
+            SizeCompressed = reader.ReadInt32();
+            Size = reader.ReadInt32();
+            LinkFileIndex = new Int24(reader);
+            Flags = reader.ReadByte();
+
+            IsCompressed = (Flags & 3) == 3;
+            Flag3 = (Flags & 8) != 0;
+            Flag4 = (Flags & 0x10) != 0;
+            Flag5 = (Flags & 0x20) != 0;
+            Flag6 = (Flags & 0x40) != 0;
+            Index = index;
+        }
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct Tab20F04B
+    public class DirectoryListLookupTab
     {
         public Hash Hash;
         public Int24 Field5;
+
+        public int Index { get; }
+        public DirectoryListLookupTab(BinaryReader reader, int index)
+        {
+            Hash = new Hash(reader);
+            Field5 = new Int24(reader);
+            Index = index;
+        }
     }
 
-    public struct Tab20Fxx
+    public class Tab20Fxx
     {
         public int FileIndex;
         public int Count;
+
+        public Tab20Fxx(BinaryReader reader)
+        {
+            FileIndex = reader.ReadInt32();
+            Count = reader.ReadInt32();
+        }
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct FileHashToIndexTab
+    public class FileListLookupTab
     {
         public Hash Hash;
-        public Int24 Field5;
+        public Int24 FileIndex;
+
+        public int Index { get; }
+        public FileListTab FileInfo { get; set; }
+
+        public FileListLookupTab(BinaryReader reader, int index)
+        {
+            Hash = new Hash(reader);
+            FileIndex = new Int24(reader);
+            Index = index;
+        }
     }
 
-    public struct Tab20F0CB
+    public class Tab20F0CB
     {
         public int Field0;
         public int Field4;
+
+        public Tab20F0CB(BinaryReader reader)
+        {
+            Field0 = reader.ReadInt32();
+            Field4 = reader.ReadInt32();
+        }
     }
 }

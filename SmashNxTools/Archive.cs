@@ -2,9 +2,12 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
+using Zstandard.Net;
 
 namespace SmashNxTools
 {
@@ -31,22 +34,22 @@ namespace SmashNxTools
 
         public void FindFullHashes()
         {
-            foreach (var hash in Table20.Field04A)
+            foreach (var hash in Table20.DirectoryList)
             {
                 hash.AddFullHash();
             }
 
-            foreach (var hash in Table20.FilePathCombine)
+            foreach (var hash in Table20.FileList)
             {
                 hash.AddFullHash();
             }
 
-            foreach (var hash in Table28.DirectoryChildren)
+            foreach (var hash in Table28.DirectoryList)
             {
                 hash.AddFullHash();
             }
 
-            foreach (var hash in Table28.Field10B)
+            foreach (var hash in Table28.EntryList)
             {
                 hash.AddFullHash();
             }
@@ -54,37 +57,18 @@ namespace SmashNxTools
 
         public void ExtractStreams(string dir)
         {
-            int i = 0;
-
-            foreach (var entry in Table20.StreamFiles)
+            for (int i = 0; i < Table20.StreamNameIndexToHash.Length; i++)
             {
-                var path = Path.Combine(dir, i.ToString("D5"));
-                Directory.CreateDirectory(Path.GetDirectoryName(path));
-                using (var file = new FileStream(Path.Combine(dir, i.ToString("D5")), FileMode.Create, FileAccess.ReadWrite))
-                {
-                    Stream.Position = entry.Offset;
-                    Stream.CopyStream(file, entry.Size);
-                }
-
-                i++;
-            }
-        }
-
-        public void ExtractBgm(string dir)
-        {
-            for (int i = 0; i < 0x980; i++)
-            {
-                var name = Table20.StreamIndexToHash[i].Hash.GetText();
-                var streamIndex = Table20.StreamIndexToHash[i].StreamIndex.GetInt();
-                var fileIndex = Table20.StreamIndexToFile[streamIndex].FileIndex;
-                var fileInfo = Table20.StreamFiles[fileIndex];
+                var name = Table20.StreamNameIndexToHash[i].Hash.GetText();
+                var fileInfo = Table20.StreamNameIndexToHash[i].Stream.File;
+                var fileIndex = Table20.StreamNameIndexToHash[i].Stream.FileIndex;
                 if (name == null)
                 {
                     name = fileIndex.ToString("D4");
-                    if (fileIndex > 0x92a) name += ".webm";
+                    if (i > 0x92a) name += ".webm";
                 }
                 name = name.Replace("stream:/", "");
-                
+
                 var path = Path.Combine(dir, name);
 
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
@@ -94,35 +78,235 @@ namespace SmashNxTools
                     Stream.Position = fileInfo.Offset;
                     Stream.CopyStream(file, fileInfo.Size);
                 }
+            }
+        }
+
+        public void ExtractFile(string filename, string outDir)
+        {
+            var file = Table20.FileList.FirstOrDefault(x => x.Path.GetText() == filename);
+            if (file == null) return;
+
+            string name = file.Path.GetText();
+            DirectoryListTab dir = file.Directory;
+            long dirOffset = dir.DirOffset.Offset;
+
+            long offset = Header.Field10 + dirOffset + file.FileOffset.Offset * 4;
+            string path;
+
+            if (name != null)
+            {
+                path = Path.Combine(outDir, name);
 
             }
+            else
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+
+                using (var fileOut = new FileStream(path, FileMode.Create, FileAccess.ReadWrite))
+                {
+                    Stream.Position = offset;
+                    var info = file.FileOffset;
+
+                    if (info.Size == 0) return;
+
+                    if ((file.Flags & 300000) == 0)
+                    {
+                        Stream.CopyStream(fileOut, info.Size);
+                    }
+                    else
+                    {
+                        using (var compStream = new ZstandardStream(Stream, CompressionMode.Decompress, true))
+                        {
+                            compStream.CopyStream(fileOut, file.FileOffset.Size);
+                        }
+                    }
+                }
+            }
+            catch (InvalidDataException)
+            {
+                File.Delete(path);
+                Console.WriteLine($"File index 0x{file.Index:x}: Can't decompress {path}");
+
+                //using (var fileOut = new FileStream(path, FileMode.Create, FileAccess.ReadWrite))
+                //{
+                //    Stream.Position = offset;
+                //    var info = file.FileOffset;
+
+                //    if (info.Size == 0) continue;
+
+                //    Stream.CopyStream(fileOut, info.Size);
+                //}
+            }
+            catch (Exception)
+            {
+                File.Delete(path);
+                Console.WriteLine($"File index 0x{file.Index:x}: Bad path {path}");
+            }
+        }
+
+        public void ExtractDirs(string outDir, IProgressReport progress = null)
+        {
+
+        }
+
+        public void ExtractFiles(string outDir, IProgressReport progress = null)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("name, file flags, dir offset, file offset, offset, size comp, size, file offset flags, offsetToFile, F1, F9, F17, Is link, F21, Is comp, OF3, OF4, OF5, OF6, bad");
+
+            FileListTab[] fileListTabs = Table20.FileList;
+
+            progress?.SetTotal(fileListTabs.Length);
+
+            for (int i = 0; i < fileListTabs.Length; i++)
+            {
+                FileListTab file = fileListTabs[i];
+                string name = file.Path.GetText();
+                DirectoryListTab dir = file.Directory;
+                var dirOffset = dir.DirOffset;
+                FileOffsetTab offsetInfo = file.FileOffset;
+
+                bool isLink = false;
+
+                long offset = Header.Field10 + dirOffset.Offset + file.FileOffset.Offset * 4;
+                string path;
+
+                if (name != null)
+                {
+                    path = Path.Combine(outDir, name);
+                }
+                else if (file.Parent.HasText())
+                {
+                    path = Path.Combine(outDir, file.Parent.GetText(), i.ToString());
+                }
+                else
+                {
+                    path = Path.Combine(outDir, "_", i.ToString());
+                }
+
+                if (file.IsLink)
+                {
+                    isLink = true;
+
+                    while (file.IsLink)
+                    {
+                        file = file.FileOffset.File;
+                    }
+
+                    dir = file.Directory;
+                    dirOffset = dir.DirOffset;
+                    offsetInfo = file.FileOffset;
+
+                    offset = Header.Field10 + dirOffset.Offset + offsetInfo.Offset * 4;
+                }
+
+                if (offsetInfo.Flag3)
+                {
+                    offsetInfo = offsetInfo.LinkedOffset;
+                    dirOffset = dirOffset.LinkOffsetTable;
+
+                    offset = Header.Field10 + dirOffset.Offset + offsetInfo.Offset * 4;
+                }
+
+                sb.AppendLine($"{name}, 0x{file.Flags:x2}, 0x{dirOffset.Offset:x}, 0x{file.FileOffset.Offset:x}, 0x{offset:x}, 0x{file.FileOffset.SizeCompressed:x}, 0x{file.FileOffset.Size:x}, 0x{file.FileOffset.Flags:x2}, 0x{file.FileOffset.LinkFileIndex:x}, {file.Flag1}, {file.Flag9}, {file.Flag17}, {file.IsLink}, {file.Flag21}, {file.FileOffset.IsCompressed}, {file.FileOffset.Flag3}, {file.FileOffset.Flag4}, {file.FileOffset.Flag5}, {file.FileOffset.Flag6},");
+
+                try
+                {
+                    if (isLink) continue;
+                    Directory.CreateDirectory(Path.GetDirectoryName(path));
+
+                    using (var fileOut = new FileStream(path, FileMode.Create, FileAccess.ReadWrite))
+                    //using (var fileOut = Stream.Null)
+                    {
+                        Stream.Position = offset;
+
+                        if (offsetInfo.Size == 0) continue;
+
+                        if (offsetInfo.SizeCompressed == 0 || offsetInfo.SizeCompressed == offsetInfo.Size)
+                        {
+                            Stream.CopyStream(fileOut, offsetInfo.Size);
+                        }
+                        else
+                        {
+                            using (var compStream = new ZstandardStream(Stream, CompressionMode.Decompress, true))
+                            {
+                                compStream.CopyStream(fileOut, offsetInfo.Size);
+                            }
+                        }
+                    }
+
+                    sb.AppendLine($"{name}, 0x{file.Flags:x2}, 0x{dirOffset.Offset:x}, 0x{offsetInfo.Offset:x}, 0x{offset:x}, 0x{offsetInfo.SizeCompressed:x}, 0x{offsetInfo.Size:x}, 0x{offsetInfo.Flags:x2}, 0x{offsetInfo.LinkFileIndex:x}, {file.Flag1}, {file.Flag9}, {file.Flag17}, {file.IsLink}, {file.Flag21}, {offsetInfo.IsCompressed}, {offsetInfo.Flag3}, {offsetInfo.Flag4}, {offsetInfo.Flag5}, {offsetInfo.Flag6}, ");
+                }
+                catch (InvalidDataException)
+                {
+                    progress?.LogMessage($"File index 0x{file.Index:x5} Offset 0x{offset:x9}: Can't decompress {path}");
+                    try
+                    {
+                        File.Delete(path);
+                        sb.AppendLine(
+                            $"{name}, 0x{file.Flags:x2}, 0x{dirOffset.Offset:x}, 0x{offsetInfo.Offset:x}, 0x{offset:x}, 0x{offsetInfo.SizeCompressed:x}, 0x{offsetInfo.Size:x}, 0x{offsetInfo.Flags:x2}, 0x{offsetInfo.LinkFileIndex:x}, {file.Flag1}, {file.Flag9}, {file.Flag17}, {file.IsLink}, {file.Flag21}, {offsetInfo.IsCompressed}, {offsetInfo.Flag3}, {offsetInfo.Flag4}, {offsetInfo.Flag5}, {offsetInfo.Flag6}, X");
+
+                        var badPath = Path.Combine(outDir, "bad", i.ToString());
+                        Directory.CreateDirectory(Path.GetDirectoryName(badPath));
+
+                        using (var fileOut = new FileStream(badPath, FileMode.Create, FileAccess.ReadWrite))
+                        {
+                            Stream.Position = offset;
+                            var info = file.FileOffset;
+
+                            if (info.Size == 0) continue;
+
+                            Stream.CopyStream(fileOut, info.Size);
+                        }
+                    }
+                    catch (Exception) { }
+                }
+                catch (Exception)
+                {
+                    Console.WriteLine($"File index 0x{file.Index:x5}: Bad path {path}");
+                    try
+                    {
+                        File.Delete(path);
+                    }
+                    catch (Exception) { }
+                }
+
+                progress?.ReportAdd(1);
+            }
+
+            File.WriteAllText("list2.csv", sb.ToString());
         }
 
         public void Print(string dir)
         {
             Directory.CreateDirectory(dir);
 
-            File.WriteAllText(Path.Combine(dir, "table20_34.txt"), PrintStruct(Table20.StreamRoot));
-            File.WriteAllText(Path.Combine(dir, "table20_38A.txt"), PrintStruct(Table20.StreamHashToIndex)); // count 0x97f
-            File.WriteAllText(Path.Combine(dir, "table20_38B.txt"), PrintStruct(Table20.StreamIndexToHash)); // max 0x14f3, count 0x97f
-            File.WriteAllText(Path.Combine(dir, "table20_3C.txt"), PrintStruct(Table20.StreamIndexToFile)); // max 0xaa0, count 0x1500
-            File.WriteAllText(Path.Combine(dir, "table20_40.txt"), PrintStruct(Table20.StreamFiles)); //count 0xaa0
+            File.WriteAllText(Path.Combine(dir, "StreamRoot.txt"), PrintStruct(Table20.StreamRoot));
+            File.WriteAllText(Path.Combine(dir, "StreamHashToNameIndex.txt"), PrintStruct(Table20.StreamHashToNameIndex)); // count 0x97f
+            File.WriteAllText(Path.Combine(dir, "StreamNameIndexToHash.txt"), PrintStruct(Table20.StreamNameIndexToHash)); // max 0x14f3, count 0x97f
+            File.WriteAllText(Path.Combine(dir, "StreamIndexToFileIndex.txt"), PrintStruct(Table20.StreamIndexToFile)); // max 0xaa0, count 0x1500
+            File.WriteAllText(Path.Combine(dir, "StreamFileOffsets.txt"), PrintStruct(Table20.StreamFiles)); //count 0xaa0
             File.WriteAllText(Path.Combine(dir, "table20_30.txt"), PrintStruct(Table20.Field30)); // Count 0xd
-            File.WriteAllText(Path.Combine(dir, "table20_04A.txt"), PrintStruct(Table20.Field04A)); //FolderPathTable Max 0x73bb1/0x64d1, count 0x64ed
-            File.WriteAllText(Path.Combine(dir, "table20_20.txt"), PrintStruct(Table20.Field20)); // File offset table  Max 0c860c8/0x507/0x8f82, count 0x8f82
-            File.WriteAllText(Path.Combine(dir, "table20_18.txt"), PrintStruct(Table20.Field18)); //FolderIndexToHash Max 0, count 0x64d0
-            File.WriteAllText(Path.Combine(dir, "table20_0CA.txt"), PrintStruct(Table20.FilePathCombine)); //FileCombineTable Max 0x860D0/0x64ed, count 0x73BB9
-            File.WriteAllText(Path.Combine(dir, "table20_24.txt"), PrintStruct(Table20.Field24)); //count 0x89b10
-            File.WriteAllText(Path.Combine(dir, "table20_04B.txt"), PrintStruct(Table20.Field04B)); //FolderHashToIndex Max 0x64ed, count 0x64ed
+            File.WriteAllText(Path.Combine(dir, "DirectoryList.txt"), PrintStruct(Table20.DirectoryList)); //FolderPathTable Max 0x73bb1/0x64d1, count 0x64ed
+            File.WriteAllText(Path.Combine(dir, "DirectoryOffsets.txt"), PrintStruct(Table20.DirectoryOffsets)); // Directory offset table  Max 0c860c8/0x507/0x8f82, count 0x8f82
+            File.WriteAllText(Path.Combine(dir, "table20_18.txt"), PrintStruct(Table20.Field18)); //Some dir list Max 0, count 0x64d0
+            File.WriteAllText(Path.Combine(dir, "FileList.txt"), PrintStruct(Table20.FileList)); //FileCombineTable Max 0x860D0/0x64ed, count 0x73BB9
+            File.WriteAllText(Path.Combine(dir, "FileOffsets.txt"), PrintStruct(Table20.FileOffsets)); //count 0x89b10
+            File.WriteAllText(Path.Combine(dir, "DirectoryListLookup.txt"), PrintStruct(Table20.DirectoryListLookup)); //FolderHashToIndex Max 0x64ed, count 0x64ed
             File.WriteAllText(Path.Combine(dir, "table20_XX.txt"), PrintStruct(Table20.FieldXX)); // count 0x3ff
-            File.WriteAllText(Path.Combine(dir, "table20_14.txt"), PrintStruct(Table20.FileHashToIndex)); // FileHashToIndex count 0x73375
+            File.WriteAllText(Path.Combine(dir, "FileListLookup.txt"), PrintStruct(Table20.FileListLookup)); // FileHashToIndex count 0x73375
             File.WriteAllText(Path.Combine(dir, "table20_0CB.txt"), PrintStruct(Table20.Field0CB)); // Multiplies by 100 count 0x73BB9
 
-            File.WriteAllText(Path.Combine(dir, "table28_08A.txt"), PrintStruct(Table28.DirectoryHashToIndex)); // FolderIndexToHash max 0x7540, count 0x7540
-            File.WriteAllText(Path.Combine(dir, "table28_08B.txt"), PrintStruct(Table28.DirectoryChildren)); // FolderToFileList Max 0x78fd4, count 0x7540 For forward/backward iteration
-            File.WriteAllText(Path.Combine(dir, "table28_10A.txt"), PrintStruct(Table28.Field10A)); // HashToIndexTable count 0x80271
+            File.WriteAllText(Path.Combine(dir, "table28_DirectoryListLookup.txt"), PrintStruct(Table28.DirectoryListLookup)); // FolderIndexToHash max 0x7540, count 0x7540
+            File.WriteAllText(Path.Combine(dir, "table28_DirectoryList.txt"), PrintStruct(Table28.DirectoryList)); // FolderToFileList Max 0x78fd4, count 0x7540 For forward/backward iteration
+            File.WriteAllText(Path.Combine(dir, "table28_EntryListLookup.txt"), PrintStruct(Table28.EntryListLookup)); // HashToIndexTable count 0x80271
             File.WriteAllText(Path.Combine(dir, "table28_0C.txt"), PrintStruct(Table28.Field0C)); // Multiplies by 100 count 0x78fd4/0x80271
-            File.WriteAllText(Path.Combine(dir, "table28_10B.txt"), PrintStruct(Table28.Field10B)); // IndexToHashTable count 0x78fd4/0x80271 For backward iteration
+            File.WriteAllText(Path.Combine(dir, "table28_EntryList.txt"), PrintStruct(Table28.EntryList)); // IndexToHashTable count 0x78fd4/0x80271 For backward iteration
         }
 
         public string PrintStruct(Array obj)
@@ -134,7 +318,15 @@ namespace SmashNxTools
 
             foreach (var field in fields)
             {
-                formats.Add("X" + Marshal.SizeOf(field.FieldType) * 2);
+                // Don't know of a way to check if the type is blittable other than trying it
+                try
+                {
+                    formats.Add("X" + Marshal.SizeOf(field.FieldType) * 2);
+                }
+                catch (ArgumentException)
+                {
+                    formats.Add("");
+                }
             }
 
             foreach (var item in obj)
@@ -161,7 +353,86 @@ namespace SmashNxTools
 
         public void RemoveBadHashes()
         {
+            const bool removeBad = true;
+            Console.WriteLine(nameof(Table20.DirectoryList));
+            foreach (var item in Table20.DirectoryList)
+            {
+                CheckBadHash(item.Path, item.Parent, item.Name, null, false, removeBad);
+            }
 
+            Console.WriteLine(nameof(Table20.FileList));
+            foreach (var item in Table20.FileList.ToArray())
+            {
+                CheckBadHash(item.Path, item.Parent, item.Name, item.Extension, true, removeBad);
+            }
+
+            Console.WriteLine(nameof(Table28.EntryList));
+            foreach (var item in Table28.EntryList)
+            {
+                CheckBadHash(item.Path, item.Parent, item.Name, item.Extension, false, removeBad);
+            }
+
+            Console.WriteLine(nameof(Table28.DirectoryList));
+            foreach (var item in Table28.DirectoryList)
+            {
+                CheckBadHash(item.Path, item.Parent, item.Name, null, false, removeBad);
+            }
+        }
+
+        public void CheckBadHash(Hash path, Hash parent, Hash name, Hash extension, bool trailingSlash, bool removeBad)
+        {
+            var fullPath = path.GetText();
+            var nameText = name.GetText();
+            var parentText = parent.GetText();
+            var extensionText = extension?.GetText();
+
+            var pathHasText = !string.IsNullOrWhiteSpace(fullPath);
+            var nameHasText = !string.IsNullOrWhiteSpace(nameText);
+            var parentHasText = !string.IsNullOrWhiteSpace(parentText);
+            var extensionHasText = !string.IsNullOrWhiteSpace(extensionText);
+
+            int parentDirAdd = trailingSlash ? 1 : 0;
+            string separator = trailingSlash ? "" : "/";
+
+            if (pathHasText && nameHasText && parentHasText)
+            {
+                var expectedFull = $"{parentText}{separator}{nameText}";
+                if (expectedFull != fullPath && parentText != "/")
+                {
+                    Console.WriteLine($"{fullPath}, {parentText}, {nameText}");
+                    return;
+                }
+            }
+
+            if (nameHasText && extensionHasText)
+            {
+                var expectedExt = Path.GetExtension(nameText).TrimStart('.');
+                if (expectedExt != extensionText)
+                {
+                    Console.WriteLine($"{nameText}, {extensionText}");
+                    if (removeBad) Hash.HashStrings.Remove(name.GetHash());
+                    return;
+                }
+            }
+
+            if (pathHasText)
+            {
+                var expectedParentText = fullPath.Remove(Math.Max(0, Math.Min(fullPath.LastIndexOf('/') + parentDirAdd, fullPath.Length - 1)));
+                var fileText = Path.GetFileName(fullPath);
+
+                var expectedParentHash = new Hash(expectedParentText).GetHash();
+                var actualParentHash = parent.GetHash();
+
+                var expectedFileHash = new Hash(fileText).GetHash();
+                var actualFileHash = name.GetHash();
+
+                if ((expectedParentHash != actualParentHash || expectedFileHash != actualFileHash) && parent.Len != 0 && parentText != "/")
+                {
+                    Console.WriteLine(fullPath);
+                    if (removeBad) Hash.HashStrings.Remove(path.GetHash());
+                    return;
+                }
+            }
         }
 
         public static uint Crc32(string input)
@@ -287,33 +558,44 @@ namespace SmashNxTools
         };
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct Int24
+    public class Int24
     {
-        private byte A;
-        private byte B;
-        private byte C;
+        public int Value;
+
+        public Int24(BinaryReader reader)
+        {
+            var a = reader.ReadByte();
+            var b = reader.ReadByte();
+            var c = reader.ReadByte();
+
+            Value = (c << 16) | (b << 8) | a;
+        }
 
         public override string ToString()
         {
-            int val = (C << 16) | (B << 8) | A;
-            return val.ToString("X6");
-        }
-
-        public int GetInt()
-        {
-            return (C << 16) | (B << 8) | A;
+            return Value.ToString("X6");
         }
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct Hash
+    public class Hash
     {
         public static Dictionary<long, string> HashStrings = new Dictionary<long, string>();
         public static HashSet<long> Hashes = new HashSet<long>();
 
         public uint Crc;
         public byte Len;
+
+        public Hash(BinaryReader reader)
+        {
+            Crc = reader.ReadUInt32();
+            Len = reader.ReadByte();
+        }
+
+        public Hash(string value)
+        {
+            Crc = Archive.Crc32C(value);
+            Len = (byte)value.Length;
+        }
 
         public override string ToString()
         {
@@ -327,6 +609,11 @@ namespace SmashNxTools
                 return str;
             }
             return null;
+        }
+
+        public bool HasText()
+        {
+            return Len > 0 && HashStrings.ContainsKey(GetHash());
         }
 
         public long GetHash()
@@ -374,10 +661,7 @@ namespace SmashNxTools
 
             foreach (var line in lines)
             {
-                var hash = Archive.Crc32C(line);
-                var key = (long)line.Length << 32 | hash;
-
-                HashStrings[key] = line;
+                AddHash(line);
             }
         }
 
@@ -405,10 +689,10 @@ namespace SmashNxTools
                 {
                     combined += s;
                     AddHashIfExists(combined);
-                   //AddHash(combined);
+                    //AddHash(combined);
                     combined += del;
                     AddHashIfExists(combined);
-                   // AddHash(combined);
+                    // AddHash(combined);
                     AddHashIfExists(s);
                     //AddHash(s);
                 }
@@ -417,18 +701,17 @@ namespace SmashNxTools
 
         public static void AddHash(string value)
         {
+            value = value.ToLowerInvariant();
             uint hash = Archive.Crc32C(value);
             long key = (long)value.Length << 32 | hash;
 
-            if (!HashStrings.ContainsKey(key))
-            {
-
-            }
+            //HashStrings.Add(key, value);
             HashStrings[key] = value;
         }
 
         public static bool AddHashIfExists(string value)
         {
+            value = value.ToLowerInvariant();
             uint hash = Archive.Crc32C(value);
             long key = (long)value.Length << 32 | hash;
 
