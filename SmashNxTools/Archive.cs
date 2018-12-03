@@ -282,6 +282,82 @@ namespace SmashNxTools
             File.WriteAllText("list2.csv", sb.ToString());
         }
 
+        public IEnumerable<byte[]> EnumerateFiles(IProgressReport progress = null)
+        {
+            FileListTab[] fileListTabs = Table20.FileList;
+
+            progress?.SetTotal(fileListTabs.Length);
+
+            for (int i = 0; i < fileListTabs.Length; i++)
+            {
+                FileListTab file = fileListTabs[i];
+                string name = file.Path.GetText();
+                DirectoryListTab dir = file.Directory;
+                var dirOffset = dir.DirOffset;
+                FileOffsetTab offsetInfo = file.FileOffset;
+
+                bool isLink = false;
+
+                long offset = Header.Field10 + dirOffset.Offset + file.FileOffset.Offset * 4;
+                string path;
+
+                if (file.IsLink)
+                {
+                    isLink = true;
+
+                    while (file.IsLink)
+                    {
+                        file = file.FileOffset.File;
+                    }
+
+                    dir = file.Directory;
+                    dirOffset = dir.DirOffset;
+                    offsetInfo = file.FileOffset;
+
+                    offset = Header.Field10 + dirOffset.Offset + offsetInfo.Offset * 4;
+                }
+
+                if (offsetInfo.Flag3)
+                {
+                    offsetInfo = offsetInfo.LinkedOffset;
+                    dirOffset = dirOffset.LinkOffsetTable;
+
+                    offset = Header.Field10 + dirOffset.Offset + offsetInfo.Offset * 4;
+                }
+
+                bool success = false;
+
+                if (isLink) continue;
+                if (offsetInfo.Size == 0) continue;
+
+                Stream.Position = offset;
+                var data = new byte[offsetInfo.Size];
+
+                try
+                {
+                    if (!offsetInfo.IsCompressed)
+                    {
+                        Stream.Read(data, 0, data.Length);
+                    }
+                    else
+                    {
+                        using (var compStream = new ZstandardStream(Stream, CompressionMode.Decompress, true))
+                        {
+                            compStream.Read(data, 0, data.Length);
+                        }
+                    }
+
+                    success = true;
+                }
+                catch (Exception)
+                {
+                }
+
+                if (success) yield return data;
+                progress?.ReportAdd(1);
+            }
+        }
+
         public void Print(string dir)
         {
             Directory.CreateDirectory(dir);
@@ -394,24 +470,40 @@ namespace SmashNxTools
             int parentDirAdd = trailingSlash ? 1 : 0;
             string separator = trailingSlash ? "" : "/";
 
-            if (pathHasText && nameHasText && parentHasText)
+            if(pathHasText) CheckInvalidStrings(path);
+            if(nameHasText) CheckInvalidStrings(name);
+            if(parentHasText) CheckInvalidStrings(parent);
+            if(extensionHasText) CheckInvalidStrings(extension);
+
+            if (parentHasText && trailingSlash)
             {
-                var expectedFull = $"{parentText}{separator}{nameText}";
-                if (expectedFull != fullPath && parentText != "/")
+                if (parentText[parentText.Length - 1] != '/')
                 {
-                    Console.WriteLine($"{fullPath}, {parentText}, {nameText}");
-                    return;
+                    Console.WriteLine($"{parentText}");
+                    if (removeBad) Hash.HashStrings.Remove(parent.GetHash());
+                    if (removeBad) Hash.NewStrings.Remove(parent.GetHash());
                 }
             }
 
             if (nameHasText && extensionHasText)
             {
-                var expectedExt = Path.GetExtension(nameText).TrimStart('.');
-                if (expectedExt != extensionText)
+                var actualExt = Path.GetExtension(nameText).TrimStart('.');
+                if (actualExt != extensionText)
                 {
                     Console.WriteLine($"{nameText}, {extensionText}");
                     if (removeBad) Hash.HashStrings.Remove(name.GetHash());
-                    return;
+                    if (removeBad) Hash.NewStrings.Remove(name.GetHash());
+                }
+            }
+
+            if (pathHasText && extensionHasText)
+            {
+                var actualExt = Path.GetExtension(fullPath).TrimStart('.');
+                if (actualExt != extensionText)
+                {
+                    Console.WriteLine($"{fullPath}, {extensionText}");
+                    if (removeBad) Hash.HashStrings.Remove(path.GetHash());
+                    if (removeBad) Hash.NewStrings.Remove(path.GetHash());
                 }
             }
 
@@ -430,38 +522,37 @@ namespace SmashNxTools
                 {
                     Console.WriteLine(fullPath);
                     if (removeBad) Hash.HashStrings.Remove(path.GetHash());
-                    return;
+                    if (removeBad) Hash.NewStrings.Remove(path.GetHash());
+                }
+            }
+
+            if (pathHasText && nameHasText && parentHasText)
+            {
+                var expectedFull = $"{parentText}{separator}{nameText}";
+                if (expectedFull != fullPath && parentText != "/")
+                {
+                    Console.WriteLine($"{fullPath}, {parentText}, {nameText}");
+                }
+            }
+
+            void CheckInvalidStrings(Hash hash)
+            {
+                string text = hash.GetText();
+
+                if (text.Contains("./") ||
+                    text.Contains("//") ||
+                    text.Contains("..") ||
+                    text.Contains("/.") ||
+                    text.EndsWith("."))
+                {
+                    Console.WriteLine($"Invalid string {text}");
+                    if (removeBad) Hash.HashStrings.Remove(hash.GetHash());
+                    if (removeBad) Hash.NewStrings.Remove(hash.GetHash());
                 }
             }
         }
 
         public static uint Crc32(string input)
-        {
-            uint crc = 0xFFFFFFFF;
-
-            foreach (char c in input)
-            {
-                crc = CrcTable[(byte)crc ^ c] ^ (crc >> 8);
-            }
-
-            return ~crc;
-        }
-
-        public static string Crc32B(string input)
-        {
-            uint crc = 0xFFFFFFFF;
-
-            foreach (char d in input)
-            {
-                char c = d;
-                if (c - 65 < 0x1A) c += (char)32;
-                crc = CrcTable[(byte)crc ^ c] ^ (crc >> 8);
-            }
-
-            return BitConverter.ToUInt64(BitConverter.GetBytes((ulong)(~crc | ((long)input.Length << 32))).Reverse().ToArray(), 0).ToString("X16").Substring(0, 10);
-        }
-
-        public static uint Crc32C(string input)
         {
             uint crc = 0xFFFFFFFF;
 
@@ -475,7 +566,7 @@ namespace SmashNxTools
             return ~crc;
         }
 
-        public static uint Crc32C(char[] input)
+        public static uint Crc32(char[] input)
         {
             uint crc = 0xFFFFFFFF;
 
@@ -579,7 +670,9 @@ namespace SmashNxTools
 
     public class Hash
     {
+        public static Dictionary<long, string> AllHashStrings = new Dictionary<long, string>();
         public static Dictionary<long, string> HashStrings = new Dictionary<long, string>();
+        public static Dictionary<long, string> NewStrings = new Dictionary<long, string>();
         public static HashSet<long> Hashes = new HashSet<long>();
 
         public uint Crc;
@@ -593,7 +686,7 @@ namespace SmashNxTools
 
         public Hash(string value)
         {
-            Crc = Archive.Crc32C(value);
+            Crc = Archive.Crc32(value);
             Len = (byte)value.Length;
         }
 
@@ -641,7 +734,7 @@ namespace SmashNxTools
                     val[i] = start;
                 }
 
-                var hash = Archive.Crc32C(val) | lenOr;
+                var hash = Archive.Crc32(val) | lenOr;
                 if (Hashes.Contains(hash))
                 {
                     AddHashIfExists(new string(val).ToLowerInvariant());
@@ -651,7 +744,7 @@ namespace SmashNxTools
 
         public static long DoHash(string str)
         {
-            var hash = Archive.Crc32C(str);
+            var hash = Archive.Crc32(str);
             return (long)str.Length << 32 | hash;
         }
 
@@ -688,6 +781,8 @@ namespace SmashNxTools
                 foreach (var s in split)
                 {
                     combined += s;
+                    AddHashIfExists(s);
+                    //AddHash(s);
                     AddHashIfExists(combined);
                     //AddHash(combined);
                     combined += del;
@@ -702,23 +797,35 @@ namespace SmashNxTools
         public static void AddHash(string value)
         {
             value = value.ToLowerInvariant();
-            uint hash = Archive.Crc32C(value);
+            uint hash = Archive.Crc32(value);
             long key = (long)value.Length << 32 | hash;
 
             //HashStrings.Add(key, value);
             HashStrings[key] = value;
+            AllHashStrings[key] = value;
         }
 
-        public static bool AddHashIfExists(string value)
+        public static bool AddHashIfExists(string value, bool addToAllHashList = true, IProgressReport progress = null)
         {
             value = value.ToLowerInvariant();
-            uint hash = Archive.Crc32C(value);
+            uint hash = Archive.Crc32(value);
             long key = (long)value.Length << 32 | hash;
+
+            if (addToAllHashList) AllHashStrings[key] = value;
 
             if (Hashes.Contains(key) && !HashStrings.ContainsKey(key) && !value.Contains('%'))
             {
                 HashStrings[key] = value;
-                Console.WriteLine($"Found new hash {value}");
+                NewStrings[key] = value;
+                if (progress == null)
+                {
+                    Console.WriteLine($"Found new hash {value}");
+                }
+                else
+                {
+                    progress.LogMessage($"Found new hash {value}");
+                }
+
                 return true;
             }
 
