@@ -299,7 +299,6 @@ namespace SmashNxTools
                 bool isLink = false;
 
                 long offset = Header.Field10 + dirOffset.Offset + file.FileOffset.Offset * 4;
-                string path;
 
                 if (file.IsLink)
                 {

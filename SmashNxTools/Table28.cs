@@ -27,7 +27,7 @@ namespace SmashNxTools
             DirectoryList = new DirectoryListTab2[Header.DirectoryCount];
             for (int i = 0; i < Header.DirectoryCount; i++)
             {
-                DirectoryList[i] = new DirectoryListTab2(reader);
+                DirectoryList[i] = new DirectoryListTab2(reader, i);
             }
 
             EntryListLookup = new EntryListLookupTab[Header.EntryCount];
@@ -45,7 +45,7 @@ namespace SmashNxTools
             EntryList = new EntryListTab[Header.EntryCount];
             for (int i = 0; i < Header.EntryCount; i++)
             {
-                EntryList[i] = new EntryListTab(reader);
+                EntryList[i] = new EntryListTab(reader, i);
             }
 
             HashSet<long> hashes = Hash.Hashes;
@@ -95,9 +95,9 @@ namespace SmashNxTools
                 item.Entry = EntryList[item.EntryIndex.Value];
             }
 
-            foreach (var item in EntryList.Where(x => x.NextSiblingIndex.Value != 0xFFFFFF))
+            foreach (var item in EntryList.Where(x => x.NextSiblingIndex != 0xFFFFFF))
             {
-                item.NextSibling = EntryList[item.NextSiblingIndex.Value];
+                item.NextSibling = EntryList[item.NextSiblingIndex];
             }
         }
     }
@@ -137,21 +137,23 @@ namespace SmashNxTools
     public class DirectoryListTab2
     {
         public Hash Path;
-        public Int24 ChildDirCount;
+        public int ChildDirCount;
         public Hash Parent;
-        public Int24 ChildFileCount;
+        public int ChildFileCount;
         public Hash Name;
         public int EntryStartIndex;
         public int EntryCount;
 
         public EntryListTab FirstEntry { get; set; }
+        public int Index { get; set; }
 
-        public DirectoryListTab2(BinaryReader reader)
+        public DirectoryListTab2(BinaryReader reader, int index)
         {
+            Index = index;
             Path = new Hash(reader);
-            ChildDirCount = new Int24(reader);
+            ChildDirCount = reader.ReadInt24();
             Parent = new Hash(reader);
-            ChildFileCount = new Int24(reader);
+            ChildFileCount = reader.ReadInt24();
             Name = new Hash(reader);
             reader.BaseStream.Position += 3;
             EntryStartIndex = reader.ReadInt32();
@@ -210,20 +212,22 @@ namespace SmashNxTools
     public class EntryListTab
     {
         public Hash Path;
-        public Int24 NextSiblingIndex;
+        public int NextSiblingIndex;
         public Hash Parent;
-        public Int24 Type;
+        public int Type;
         public Hash Name;
         public Hash Extension;
 
+        public int Index { get; set; }
         public EntryListTab NextSibling { get; set; }
 
-        public EntryListTab(BinaryReader reader)
+        public EntryListTab(BinaryReader reader, int index)
         {
+            Index = index;
             Path = new Hash(reader);
-            NextSiblingIndex = new Int24(reader);
+            NextSiblingIndex = reader.ReadInt24();
             Parent = new Hash(reader);
-            Type = new Int24(reader);
+            Type = reader.ReadInt24();
             Name = new Hash(reader);
             reader.BaseStream.Position += 3;
             Extension = new Hash(reader);

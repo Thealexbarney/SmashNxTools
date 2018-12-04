@@ -30,22 +30,51 @@ namespace SmashNxTools
 
                 Hash.LoadHashes("hashstrings.txt");
                 var archive = new Archive(file);
-                LoadDump3("hashstrings.txt");
-                //LoadDump3("toimport.txt");
+                var tree = new FsTree(archive);
+                var entries = tree.EnumerateEntries().Select(x => x.PathText).Where(x => x != null).ToArray();
+                File.WriteAllLines("file list.txt", entries);
+                tree.ValidateNames();
+
+                // File.WriteAllLines("search_strings.txt", tree.GetSearchStrings());
+
+                //LoadDump3("hashstrings.txt");
+                LoadDump3("toimport.txt");
                 //LoadDump3("new hashes.txt");
 
-                LoadDump3("comparcstrings.txt");
-               // LoadDump3("comparcstrings67.txt");
-                LoadDump3("dump.txt");
-               // GetDecimalFormatStrings();
+               // LoadDump3("comparcstrings.txt");
+                //LoadDump3("comparcstrings67.txt");
+               // LoadDump3("dump.txt");
+                SearchTreeStrings(tree);
+                // GetDecimalFormatStrings();
                 //GetStringFormatStrings(archive);
-                GetStringFormatStringsFromFile(archive, "format.txt");
+                //GetStringFormatStringsFromFile(archive, "search_strings.txt");
 
                 //FindArcStrings(archive);
-                //FindNewStrings(archive);
+                FindNewStrings(archive);
                 RemoveBadHashes(archive);
                 ExportHashes(archive);
-                ExtractAll(archive);
+                //ExtractAll(archive);
+            }
+        }
+
+        public static void SearchTreeStrings(FsTree tree)
+        {
+            var strings = Hash.AllHashStrings.Values.ToLookup(x => x.Length);
+            var formatStrings = tree.GetSearchStrings().ToArray();
+
+            using (var progress = new ProgressBar())
+            {
+                progress.SetTotal(formatStrings.Length);
+
+                foreach ((string text, int length) in formatStrings)
+                {
+                    foreach (string str2 in strings[length])
+                    {
+                        Hash.AddHashIfExists(text.Replace("%s", str2), false, progress);
+                    }
+
+                    progress.ReportAdd(1);
+                }
             }
         }
 
@@ -57,11 +86,12 @@ namespace SmashNxTools
             {
                 Hash.AddHashIfExists(line);
                 Hash.AddHash(line);
-               // if (line.Contains("%")) continue;
+                // if (line.Contains("%")) continue;
 
                 Split(line, '/');
-               // Split(line, '_');
-               // Split(line, '.');
+                Split(line, '_');
+                Split(line, '.');
+                Split(line.Replace('/', '.'), '.');
             }
 
             void Split(string str, char del)
@@ -380,8 +410,12 @@ namespace SmashNxTools
 
         public static void GetStringFormatStringsFromFile(Archive archive, string filename)
         {
+            GetStringFormatStringsFromArray(archive, File.ReadAllLines(filename));
+        }
+
+        public static void GetStringFormatStringsFromArray(Archive archive, string[] formatStrings)
+        {
             string[] strings = Hash.AllHashStrings.Values.ToArray();
-            string[] formatStrings = File.ReadAllLines(filename);
             string[] extensions = archive.Table20.FileList.Select(x => $".{x.Extension.GetText()}").Where(x => x != null).Distinct().ToArray();
 
             using (var progress = new ProgressBar())
