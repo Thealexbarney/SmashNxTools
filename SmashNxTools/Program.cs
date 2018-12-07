@@ -12,7 +12,7 @@ namespace SmashNxTools
     {
         static void Main(string[] args)
         {
-            if (args.Length != 1)
+            if (args.Length == 0)
             {
                 Console.WriteLine("Usage: program.exe data.arc");
                 return;
@@ -30,30 +30,43 @@ namespace SmashNxTools
 
                 Hash.LoadHashes("hashstrings.txt");
                 var archive = new Archive(file);
-                var tree = new FsTree(archive);
-                var entries = tree.EnumerateEntries().Select(x => x.PathText).Where(x => x != null).ToArray();
-                File.WriteAllLines("file list.txt", entries);
-                tree.ValidateNames();
 
-                // File.WriteAllLines("search_strings.txt", tree.GetSearchStrings());
+                //ExtractAll(archive);
 
-                //LoadDump3("hashstrings.txt");
-                LoadDump3("toimport.txt");
+                //using (var progress = new ProgressBar())
+                //{
+                //    archive.ExtractFile(args[1], "files", progress);
+                //}
+
+                //var tree = new FsTree(archive);
+                //var entries = tree.EnumerateEntries().Select(x => x.NameText).Where(x => x != null).Distinct().OrderBy(x => x).ToArray();
+                // var entries = tree.EnumerateEntries().Where(x => x.NameText == null).Select(x => x.DisplayPathText).ToArray();
+                // var unkHashes = tree.EnumerateEntries().Where(x => x.NameText == null).Select(x => x.NameHash).Distinct().OrderBy(x => x).Select(FsTree.GetHashText).ToArray();
+                //File.WriteAllLines("file list.txt", entries);
+                //File.WriteAllLines("unknown hashes.txt", unkHashes);
+                // tree.ValidateNames();
+
+                // File.WriteAllLines("search_stringsF.txt", tree.GetSearchStrings());
+
+                 // LoadDump3("hashstrings.txt");
+                //LoadDump3("toimport.txt");
                 //LoadDump3("new hashes.txt");
 
-               // LoadDump3("comparcstrings.txt");
+               // LoadDump3("comparcstrings2.txt");
                 //LoadDump3("comparcstrings67.txt");
-               // LoadDump3("dump.txt");
-                SearchTreeStrings(tree);
+                LoadDump3("dump.txt");
+                // SearchTreeStrings(tree);
                 // GetDecimalFormatStrings();
                 //GetStringFormatStrings(archive);
                 //GetStringFormatStringsFromFile(archive, "search_strings.txt");
 
-                //FindArcStrings(archive);
-                FindNewStrings(archive);
-                RemoveBadHashes(archive);
-                ExportHashes(archive);
-                //ExtractAll(archive);
+               // FindArcStrings(archive);
+
+                //AutoSearch(archive, tree);
+               // FindNewStrings(archive);
+               // RemoveBadHashes(archive);
+               // ExportHashes(archive);
+                ExtractAll(archive);
             }
         }
 
@@ -123,12 +136,12 @@ namespace SmashNxTools
             using (var progress = new ProgressBar())
             {
                 using (var writer =
-                    new StreamWriter(new FileStream("comparcstrings67.txt", FileMode.Create, FileAccess.ReadWrite),
+                    new StreamWriter(new FileStream("comparcstrings2.txt", FileMode.Create, FileAccess.ReadWrite),
                         Encoding.ASCII))
                 {
                     foreach (var file in archive.EnumerateFiles(progress))
                     {
-                        foreach (var s in FindStrings(file, 6, 7).Where(x => !found.Contains(x)))
+                        foreach (var s in FindStrings(file, 8).Where(x => !found.Contains(x)))
                         {
                             found.Add(s);
                             writer.WriteLine(s);
@@ -194,7 +207,7 @@ namespace SmashNxTools
 
             Console.WriteLine("Enter to save tables");
             Console.ReadLine();
-            archive.Print("tables2");
+            archive.Print("tables3");
         }
 
         public static void FindNewStrings(Archive archive)
@@ -205,8 +218,8 @@ namespace SmashNxTools
             archive.FindFullHashes();
             archive.FindFullHashes();
             archive.FindFullHashes();
-            //AddExtensions(archive);
-            //ModStrings();
+            AddExtensions(archive);
+            ModStrings();
             archive.FindFullHashes();
             archive.FindFullHashes();
             archive.FindFullHashes();
@@ -215,6 +228,46 @@ namespace SmashNxTools
             // Hash.LoadDump2("hashstrings.txt");
             //Hash.LoadDump2("arcstrings_short.txt");
             //Hash.LoadDump2("words.txt");
+        }
+
+        public static void AutoSearch(Archive archive, FsTree tree)
+        {
+            ILookup<int, string> lookup = Hash.AllHashStrings.Values.ToLookup(x => x.Length, x => x);
+            FsNode[] unknownNodes = tree.EnumerateEntries().Where(x => x.NameText == null).ToArray();
+
+            using (var progress = new ProgressBar())
+            {
+                progress.SetTotal(unknownNodes.Length);
+
+                foreach (var node in unknownNodes)
+                {
+                    int length = GetHashLength(node.NameHash);
+                    if (node.Type == EntryType.File)
+                    {
+                        length -= GetHashLength(node.ExtensionHash) + 1;
+                    }
+
+                    string text = $"{node.ParentText}/%s{(node.Type == EntryType.File ? $".{node.ExtensionText}" : "")}";
+
+                    //progress.LogMessage($"{length}, {text}");
+                    foreach (var str in lookup[length])
+                    {
+                        Hash.AddHashIfExists(text.Replace("%s", str), false, progress);
+                    }
+
+                    progress.ReportAdd(1);
+                }
+            }
+        }
+
+        public static int GetHashLength(long hash)
+        {
+            return (byte)(hash >> 32);
+        }
+
+        public static string GetHashText(long hash)
+        {
+            return $"{hash >> 32:x2}-{hash:x8}";
         }
 
         public static IEnumerable<string> FindStrings(byte[] data, int minLength, int maxLength = int.MaxValue)
@@ -252,11 +305,12 @@ namespace SmashNxTools
 
         public static void ModStrings()
         {
-            for (int i = 0; i < 20; i++)
-            {
-                Hash.AddHashIfExists($"fighter_color_{i}");
-                Hash.AddHashIfExists($"fighter_{i}");
-            }
+            Console.WriteLine("Running ModStrings");
+            //for (int i = 0; i < 20; i++)
+            //{
+            //    Hash.AddHashIfExists($"fighter_color_{i}");
+            //    Hash.AddHashIfExists($"fighter_{i}");
+            //}
 
             string[] strings = Hash.AllHashStrings.Values.ToArray();
             var list = new List<string>();
@@ -268,6 +322,8 @@ namespace SmashNxTools
                 {
                     string str = strings[s];
                     list.Clear();
+
+                    list.Add($"ui_{str}_db.prc");
 
                     //list.Add($"se_enemy_{str}.nus3audio");
                     //list.Add($"se_enemy_{str}.tonelabel");
@@ -283,14 +339,14 @@ namespace SmashNxTools
                     //list.Add($"sound/bank/fighter_voice/{str}.nus3bank");
                     //list.Add($"sound/bank/fighter_voice/{str}.tonelabel");
                     //list.Add($"sound/bank/fighter_voice/{str}.nus3audio");
-                    list.Add($"assist/{str}/param/param.prc");
-                    list.Add($"pokemon/{str}/param/param.prc");
-                    list.Add($"boss/{str}/param/param.prc");
-                    list.Add($"item/{str}/param/param.prc");
-                    list.Add($"assist/{str}/param/duet_param.prc");
-                    list.Add($"pokemon/{str}/param/duet_param.prc");
-                    list.Add($"boss/{str}/param/duet_param.prc");
-                    list.Add($"item/{str}/param/duet_param.prc");
+                    //list.Add($"assist/{str}/param/param.prc");
+                    //list.Add($"pokemon/{str}/param/param.prc");
+                    //list.Add($"boss/{str}/param/param.prc");
+                    //list.Add($"item/{str}/param/param.prc");
+                    //list.Add($"assist/{str}/param/duet_param.prc");
+                    //list.Add($"pokemon/{str}/param/duet_param.prc");
+                    //list.Add($"boss/{str}/param/duet_param.prc");
+                    //list.Add($"item/{str}/param/duet_param.prc");
 
                     for (int i = 0; i < 9; i++)
                     {
@@ -305,7 +361,7 @@ namespace SmashNxTools
                         //list.Add($"sound/bank/fighter_voice/vc_{str}_cheer_c{i:d2}.tonelabel");
                         //list.Add($"camera/fighter/{str}/c{i:d2}");
                         //list.Add($"standard_route_{str}.prc");
-                        list.Add($"stream:/movie/technique/{str}.webm");
+                        // list.Add($"stream:/movie/technique/{str}.webm");
                         //list.Add($"{str}/c{i:d2}");
                     }
 
@@ -325,25 +381,25 @@ namespace SmashNxTools
                     //    }
                     // }
 
-                    if (str.Contains("%02d"))
-                    {
-                        for (int i = 0; i < 20; i++)
-                        {
-                            list.Add(str.Replace("%02d", $"{i:d2}"));
-                        }
-                    }
+                    //if (str.Contains("%02d"))
+                    //{
+                    //    for (int i = 0; i < 20; i++)
+                    //    {
+                    //        list.Add(str.Replace("%02d", $"{i:d2}"));
+                    //    }
+                    //}
 
-                    if (str.Contains("%d"))
-                    {
-                        for (int i = 0; i < 20; i++)
-                        {
-                            list.Add(str.Replace("%02d", $"{i:d}"));
-                        }
-                    }
+                    //if (str.Contains("%d"))
+                    //{
+                    //    for (int i = 0; i < 20; i++)
+                    //    {
+                    //        list.Add(str.Replace("%02d", $"{i:d}"));
+                    //    }
+                    //}
 
                     foreach (var item in list)
                     {
-                        Hash.AddHashIfExists(item, false);
+                        Hash.AddHashIfExists(item, false, progress);
                     }
 
                     progress.ReportAdd(1);

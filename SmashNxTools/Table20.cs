@@ -214,14 +214,34 @@ namespace SmashNxTools
             {
                 if(item.Flag3)
                 {
-                    if (Header.Field10 + item.LinkFileIndex.Value < FileOffsets.Length)
+                    if (Header.Field10 + item.LinkFileIndex < FileOffsets.Length)
                     {
-                        item.LinkedOffset = FileOffsets[Header.Field10 + item.LinkFileIndex.Value];
+                        if (item.LinkFileIndex == 0x7d)
+                        {
+                            ;
+                        }
+                        item.LinkedOffset = FileOffsets[Header.Field10 + item.LinkFileIndex];
+
+                        int i = Header.Field8;
+                        while (DirectoryOffsets[i].FirstFileIndex + DirectoryOffsets[i].Field14 <= item.LinkFileIndex)
+                        {
+                            i++;
+                        }
+
+                        item.LinkedDirOffset = DirectoryOffsets[i];
                     }
+
+                    //int i = Header.Field8;
+                    //while (DirectoryOffsets[i].FirstFileIndex + DirectoryOffsets[i].Field14 < item.LinkFileIndex)
+                    //{
+                    //    i++;
+                    //}
+
+                    //item.LinkedDirOffset = DirectoryOffsets[i];
                     continue;
                 }
 
-                item.File = FileList[item.LinkFileIndex.Value];
+                item.File = FileList[item.LinkFileIndex];
             }
 
             foreach (var item in DirectoryOffsets)
@@ -529,7 +549,7 @@ namespace SmashNxTools
         public int Offset;
         public int SizeCompressed;
         public int Size;
-        public Int24 LinkFileIndex;
+        public int LinkFileIndex;
         public byte Flags;
 
         public bool IsCompressed;
@@ -541,13 +561,14 @@ namespace SmashNxTools
         public int Index { get; }
         public FileListTab File { get; set; }
         public FileOffsetTab LinkedOffset { get; set; }
+        public DirectoryOffsetTable LinkedDirOffset { get; set; }
 
         public FileOffsetTab(BinaryReader reader, int index)
         {
             Offset = reader.ReadInt32();
             SizeCompressed = reader.ReadInt32();
             Size = reader.ReadInt32();
-            LinkFileIndex = new Int24(reader);
+            LinkFileIndex = reader.ReadInt24();
             Flags = reader.ReadByte();
 
             IsCompressed = (Flags & 3) == 3;

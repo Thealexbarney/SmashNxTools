@@ -25,11 +25,39 @@ namespace SmashNxTools
 
             Header = new ArchiveHeader(reader);
 
+            (byte[] table20, byte[] table28) = GetTables();
+
+            Table20 = new Table20(new BinaryReader(new MemoryStream(table20)));
+            Table28 = new Table28(new BinaryReader(new MemoryStream(table28)));
+        }
+
+        private (byte[] table20, byte[] table28) GetTables()
+        {
+            var reader = new BinaryReader(Stream);
+
             reader.BaseStream.Position = Header.Field20;
-            Table20 = new Table20(reader);
+            var header20 = new CompressedTableHeader(reader);
+            var table20 = new byte[header20.Size];
 
             reader.BaseStream.Position = Header.Field28;
-            Table28 = new Table28(reader);
+            var header28 = new CompressedTableHeader(reader);
+            var table28 = new byte[header28.Size];
+
+            reader.BaseStream.Position = Header.Field20 + header20.DataOffset;
+
+            using (var compStream = new ZstandardStream(Stream, CompressionMode.Decompress, true))
+            {
+                compStream.Read(table20, 0, table20.Length);
+            }
+
+            reader.BaseStream.Position = Header.Field28 + header28.DataOffset;
+
+            using (var compStream = new ZstandardStream(Stream, CompressionMode.Decompress, true))
+            {
+                compStream.Read(table28, 0, table28.Length);
+            }
+
+            return (table20, table28);
         }
 
         public void FindFullHashes()
@@ -81,71 +109,179 @@ namespace SmashNxTools
             }
         }
 
-        public void ExtractFile(string filename, string outDir)
+        public void ExtractFile(string filename, string outDir, IProgressReport progress)
         {
             var file = Table20.FileList.FirstOrDefault(x => x.Path.GetText() == filename);
             if (file == null) return;
 
+            ExtractFileIndex(file.Index, outDir, progress);
+        }
+
+        public byte[] GetFileFromIndex(int index)
+        {
+            FileListTab file = Table20.FileList[index];
             string name = file.Path.GetText();
             DirectoryListTab dir = file.Directory;
-            long dirOffset = dir.DirOffset.Offset;
+            DirectoryOffsetTable dirOffset = dir.DirOffset;
+            FileOffsetTab offsetInfo = file.FileOffset;
 
-            long offset = Header.Field10 + dirOffset + file.FileOffset.Offset * 4;
+            bool isLink = false;
+
+            if (file.IsLink)
+            {
+                isLink = true;
+
+                while (file.IsLink)
+                {
+                    file = file.FileOffset.File;
+                }
+
+                dir = file.Directory;
+                dirOffset = dir.DirOffset;
+                offsetInfo = file.FileOffset;
+            }
+
+            if (offsetInfo.Flag3)
+            {
+                dirOffset = offsetInfo.LinkedDirOffset;
+                offsetInfo = offsetInfo.LinkedOffset;
+            }
+
+            if (isLink) return new byte[0];
+            if (offsetInfo.Size == 0) return new byte[0];
+
+            long offset = Header.Field10 + dirOffset.Offset + offsetInfo.Offset * 4;
+
+            var data = new byte[offsetInfo.Size];
+            Stream.Position = offset;
+
+            if (offsetInfo.SizeCompressed == 0 || offsetInfo.SizeCompressed == offsetInfo.Size)
+            {
+                Stream.Read(data, 0, offsetInfo.Size);
+            }
+            else
+            {
+                using (var compStream = new ZstandardStream(Stream, CompressionMode.Decompress, true))
+                {
+                    compStream.Read(data, 0, offsetInfo.Size);
+                }
+            }
+
+            return data;
+        }
+
+        public void ExtractFileIndex(int index, string outDir, IProgressReport progress, StringBuilder sb = null)
+        {
+            FileListTab file = Table20.FileList[index];
+            string name = file.Path.GetText();
+            DirectoryListTab dir = file.Directory;
+            DirectoryOffsetTable dirOffset = dir.DirOffset;
+            FileOffsetTab offsetInfo = file.FileOffset;
+
+            bool isLink = false;
+
+            long offset = Header.Field10 + dirOffset.Offset + file.FileOffset.Offset * 4;
             string path;
 
             if (name != null)
             {
                 path = Path.Combine(outDir, name);
-
+            }
+            else if (file.Parent.HasText())
+            {
+                path = Path.Combine(outDir, file.Parent.GetText(), index.ToString());
             }
             else
             {
-                return;
+                path = Path.Combine(outDir, "_", index.ToString());
             }
+
+            if (file.IsLink)
+            {
+                isLink = true;
+
+                while (file.IsLink)
+                {
+                    file = file.FileOffset.File;
+                }
+
+                dir = file.Directory;
+                dirOffset = dir.DirOffset;
+                offsetInfo = file.FileOffset;
+
+                offset = Header.Field10 + dirOffset.Offset + offsetInfo.Offset * 4;
+            }
+
+            if (offsetInfo.Flag3)
+            {
+                dirOffset = offsetInfo.LinkedDirOffset;
+                offsetInfo = offsetInfo.LinkedOffset;
+
+                offset = Header.Field10 + dirOffset.Offset + offsetInfo.Offset * 4;
+            }
+
+            //sb?.AppendLine($"{name}, 0x{file.Flags:x2}, 0x{dirOffset.Offset:x}, 0x{file.FileOffset.Offset:x}, 0x{offset:x}, 0x{file.FileOffset.SizeCompressed:x}, 0x{file.FileOffset.Size:x}, 0x{file.FileOffset.Flags:x2}, 0x{file.FileOffset.LinkFileIndex:x}, {file.Flag1}, {file.Flag9}, {file.Flag17}, {file.IsLink}, {file.Flag21}, {file.FileOffset.IsCompressed}, {file.FileOffset.Flag3}, {file.FileOffset.Flag4}, {file.FileOffset.Flag5}, {file.FileOffset.Flag6},");
+
+            //return;
 
             try
             {
+                if (isLink) return;
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
 
-                using (var fileOut = new FileStream(path, FileMode.Create, FileAccess.ReadWrite))
+                //using (var fileOut = new FileStream(path, FileMode.Create, FileAccess.ReadWrite))
+                using (var fileOut = Stream.Null)
                 {
                     Stream.Position = offset;
-                    var info = file.FileOffset;
 
-                    if (info.Size == 0) return;
+                    if (offsetInfo.Size == 0) return;
 
-                    if ((file.Flags & 300000) == 0)
+                    if (offsetInfo.SizeCompressed == 0 || offsetInfo.SizeCompressed == offsetInfo.Size)
                     {
-                        Stream.CopyStream(fileOut, info.Size);
+                        Stream.CopyStream(fileOut, offsetInfo.Size);
                     }
                     else
                     {
                         using (var compStream = new ZstandardStream(Stream, CompressionMode.Decompress, true))
                         {
-                            compStream.CopyStream(fileOut, file.FileOffset.Size);
+                            compStream.CopyStream(fileOut, offsetInfo.Size);
                         }
                     }
                 }
+
+                sb?.AppendLine($"{name}, 0x{file.Flags:x2}, 0x{dirOffset.Offset:x}, 0x{offsetInfo.Offset:x}, 0x{offset:x}, 0x{offsetInfo.SizeCompressed:x}, 0x{offsetInfo.Size:x}, 0x{offsetInfo.Flags:x2}, 0x{offsetInfo.LinkFileIndex:x}, {file.Flag1}, {file.Flag9}, {file.Flag17}, {file.IsLink}, {file.Flag21}, {offsetInfo.IsCompressed}, {offsetInfo.Flag3}, {offsetInfo.Flag4}, {offsetInfo.Flag5}, {offsetInfo.Flag6}, ");
             }
             catch (InvalidDataException)
             {
-                File.Delete(path);
-                Console.WriteLine($"File index 0x{file.Index:x}: Can't decompress {path}");
+                progress?.LogMessage($"File index 0x{file.Index:x5} Offset 0x{offset:x9}: Can't decompress {path}");
+                try
+                {
+                    File.Delete(path);
+                    sb?.AppendLine($"{name}, 0x{file.Flags:x2}, 0x{dirOffset.Offset:x}, 0x{offsetInfo.Offset:x}, 0x{offset:x}, 0x{offsetInfo.SizeCompressed:x}, 0x{offsetInfo.Size:x}, 0x{offsetInfo.Flags:x2}, 0x{offsetInfo.LinkFileIndex:x}, {file.Flag1}, {file.Flag9}, {file.Flag17}, {file.IsLink}, {file.Flag21}, {offsetInfo.IsCompressed}, {offsetInfo.Flag3}, {offsetInfo.Flag4}, {offsetInfo.Flag5}, {offsetInfo.Flag6}, X");
 
-                //using (var fileOut = new FileStream(path, FileMode.Create, FileAccess.ReadWrite))
-                //{
-                //    Stream.Position = offset;
-                //    var info = file.FileOffset;
+                    var badPath = Path.Combine(outDir, "bad", index.ToString());
+                    Directory.CreateDirectory(Path.GetDirectoryName(badPath));
 
-                //    if (info.Size == 0) continue;
+                    using (var fileOut = new FileStream(badPath, FileMode.Create, FileAccess.ReadWrite))
+                    {
+                        Stream.Position = offset;
+                        var info = file.FileOffset;
 
-                //    Stream.CopyStream(fileOut, info.Size);
-                //}
+                        if (info.Size == 0) return;
+
+                        Stream.CopyStream(fileOut, info.Size);
+                    }
+                }
+                catch (Exception) { }
             }
             catch (Exception)
             {
-                File.Delete(path);
-                Console.WriteLine($"File index 0x{file.Index:x}: Bad path {path}");
+                Console.WriteLine($"File index 0x{file.Index:x5}: Bad path {path}");
+                try
+                {
+                    File.Delete(path);
+                }
+                catch (Exception) { }
             }
         }
 
@@ -165,117 +301,7 @@ namespace SmashNxTools
 
             for (int i = 0; i < fileListTabs.Length; i++)
             {
-                FileListTab file = fileListTabs[i];
-                string name = file.Path.GetText();
-                DirectoryListTab dir = file.Directory;
-                var dirOffset = dir.DirOffset;
-                FileOffsetTab offsetInfo = file.FileOffset;
-
-                bool isLink = false;
-
-                long offset = Header.Field10 + dirOffset.Offset + file.FileOffset.Offset * 4;
-                string path;
-
-                if (name != null)
-                {
-                    path = Path.Combine(outDir, name);
-                }
-                else if (file.Parent.HasText())
-                {
-                    path = Path.Combine(outDir, file.Parent.GetText(), i.ToString());
-                }
-                else
-                {
-                    path = Path.Combine(outDir, "_", i.ToString());
-                }
-
-                if (file.IsLink)
-                {
-                    isLink = true;
-
-                    while (file.IsLink)
-                    {
-                        file = file.FileOffset.File;
-                    }
-
-                    dir = file.Directory;
-                    dirOffset = dir.DirOffset;
-                    offsetInfo = file.FileOffset;
-
-                    offset = Header.Field10 + dirOffset.Offset + offsetInfo.Offset * 4;
-                }
-
-                if (offsetInfo.Flag3)
-                {
-                    offsetInfo = offsetInfo.LinkedOffset;
-                    dirOffset = dirOffset.LinkOffsetTable;
-
-                    offset = Header.Field10 + dirOffset.Offset + offsetInfo.Offset * 4;
-                }
-
-                sb.AppendLine($"{name}, 0x{file.Flags:x2}, 0x{dirOffset.Offset:x}, 0x{file.FileOffset.Offset:x}, 0x{offset:x}, 0x{file.FileOffset.SizeCompressed:x}, 0x{file.FileOffset.Size:x}, 0x{file.FileOffset.Flags:x2}, 0x{file.FileOffset.LinkFileIndex:x}, {file.Flag1}, {file.Flag9}, {file.Flag17}, {file.IsLink}, {file.Flag21}, {file.FileOffset.IsCompressed}, {file.FileOffset.Flag3}, {file.FileOffset.Flag4}, {file.FileOffset.Flag5}, {file.FileOffset.Flag6},");
-
-                try
-                {
-                    if (isLink) continue;
-                    Directory.CreateDirectory(Path.GetDirectoryName(path));
-
-                    using (var fileOut = new FileStream(path, FileMode.Create, FileAccess.ReadWrite))
-                    //using (var fileOut = Stream.Null)
-                    {
-                        Stream.Position = offset;
-
-                        if (offsetInfo.Size == 0) continue;
-
-                        if (offsetInfo.SizeCompressed == 0 || offsetInfo.SizeCompressed == offsetInfo.Size)
-                        {
-                            Stream.CopyStream(fileOut, offsetInfo.Size);
-                        }
-                        else
-                        {
-                            using (var compStream = new ZstandardStream(Stream, CompressionMode.Decompress, true))
-                            {
-                                compStream.CopyStream(fileOut, offsetInfo.Size);
-                            }
-                        }
-                    }
-
-                    sb.AppendLine($"{name}, 0x{file.Flags:x2}, 0x{dirOffset.Offset:x}, 0x{offsetInfo.Offset:x}, 0x{offset:x}, 0x{offsetInfo.SizeCompressed:x}, 0x{offsetInfo.Size:x}, 0x{offsetInfo.Flags:x2}, 0x{offsetInfo.LinkFileIndex:x}, {file.Flag1}, {file.Flag9}, {file.Flag17}, {file.IsLink}, {file.Flag21}, {offsetInfo.IsCompressed}, {offsetInfo.Flag3}, {offsetInfo.Flag4}, {offsetInfo.Flag5}, {offsetInfo.Flag6}, ");
-                }
-                catch (InvalidDataException)
-                {
-                    progress?.LogMessage($"File index 0x{file.Index:x5} Offset 0x{offset:x9}: Can't decompress {path}");
-                    try
-                    {
-                        File.Delete(path);
-                        sb.AppendLine(
-                            $"{name}, 0x{file.Flags:x2}, 0x{dirOffset.Offset:x}, 0x{offsetInfo.Offset:x}, 0x{offset:x}, 0x{offsetInfo.SizeCompressed:x}, 0x{offsetInfo.Size:x}, 0x{offsetInfo.Flags:x2}, 0x{offsetInfo.LinkFileIndex:x}, {file.Flag1}, {file.Flag9}, {file.Flag17}, {file.IsLink}, {file.Flag21}, {offsetInfo.IsCompressed}, {offsetInfo.Flag3}, {offsetInfo.Flag4}, {offsetInfo.Flag5}, {offsetInfo.Flag6}, X");
-
-                        var badPath = Path.Combine(outDir, "bad", i.ToString());
-                        Directory.CreateDirectory(Path.GetDirectoryName(badPath));
-
-                        using (var fileOut = new FileStream(badPath, FileMode.Create, FileAccess.ReadWrite))
-                        {
-                            Stream.Position = offset;
-                            var info = file.FileOffset;
-
-                            if (info.Size == 0) continue;
-
-                            Stream.CopyStream(fileOut, info.Size);
-                        }
-                    }
-                    catch (Exception) { }
-                }
-                catch (Exception)
-                {
-                    Console.WriteLine($"File index 0x{file.Index:x5}: Bad path {path}");
-                    try
-                    {
-                        File.Delete(path);
-                    }
-                    catch (Exception) { }
-                }
-
+                ExtractFileIndex(i, outDir, progress, sb);
                 progress?.ReportAdd(1);
             }
 
@@ -290,66 +316,17 @@ namespace SmashNxTools
 
             for (int i = 0; i < fileListTabs.Length; i++)
             {
-                FileListTab file = fileListTabs[i];
-                string name = file.Path.GetText();
-                DirectoryListTab dir = file.Directory;
-                var dirOffset = dir.DirOffset;
-                FileOffsetTab offsetInfo = file.FileOffset;
-
-                bool isLink = false;
-
-                long offset = Header.Field10 + dirOffset.Offset + file.FileOffset.Offset * 4;
-
-                if (file.IsLink)
-                {
-                    isLink = true;
-
-                    while (file.IsLink)
-                    {
-                        file = file.FileOffset.File;
-                    }
-
-                    dir = file.Directory;
-                    dirOffset = dir.DirOffset;
-                    offsetInfo = file.FileOffset;
-
-                    offset = Header.Field10 + dirOffset.Offset + offsetInfo.Offset * 4;
-                }
-
-                if (offsetInfo.Flag3)
-                {
-                    offsetInfo = offsetInfo.LinkedOffset;
-                    dirOffset = dirOffset.LinkOffsetTable;
-
-                    offset = Header.Field10 + dirOffset.Offset + offsetInfo.Offset * 4;
-                }
-
                 bool success = false;
-
-                if (isLink) continue;
-                if (offsetInfo.Size == 0) continue;
-
-                Stream.Position = offset;
-                var data = new byte[offsetInfo.Size];
+                byte[] data = new byte[0];
 
                 try
                 {
-                    if (!offsetInfo.IsCompressed)
-                    {
-                        Stream.Read(data, 0, data.Length);
-                    }
-                    else
-                    {
-                        using (var compStream = new ZstandardStream(Stream, CompressionMode.Decompress, true))
-                        {
-                            compStream.Read(data, 0, data.Length);
-                        }
-                    }
-
+                    data = GetFileFromIndex(i);
                     success = true;
                 }
                 catch (Exception)
                 {
+                    progress?.LogMessage($"Error getting file {i}");
                 }
 
                 if (success) yield return data;
@@ -469,10 +446,10 @@ namespace SmashNxTools
             int parentDirAdd = trailingSlash ? 1 : 0;
             string separator = trailingSlash ? "" : "/";
 
-            if(pathHasText) CheckInvalidStrings(path);
-            if(nameHasText) CheckInvalidStrings(name);
-            if(parentHasText) CheckInvalidStrings(parent);
-            if(extensionHasText) CheckInvalidStrings(extension);
+            if (pathHasText) CheckInvalidStrings(path);
+            if (nameHasText) CheckInvalidStrings(name);
+            if (parentHasText) CheckInvalidStrings(parent);
+            if (extensionHasText) CheckInvalidStrings(extension);
 
             if (parentHasText && trailingSlash)
             {

@@ -23,4 +23,20 @@ namespace SmashNxTools
             Field30 = reader.ReadInt64();
         }
     }
+
+    public class CompressedTableHeader
+    {
+        public int DataOffset { get; set; }
+        public int Size { get; set; }
+        public int SizeCompressed { get; set; }
+        public int TotalSizeCompressed { get; set; }
+
+        public CompressedTableHeader(BinaryReader reader)
+        {
+            DataOffset = reader.ReadInt32();
+            Size = reader.ReadInt32();
+            SizeCompressed = reader.ReadInt32();
+            TotalSizeCompressed = reader.ReadInt32();
+        }
+    }
 }

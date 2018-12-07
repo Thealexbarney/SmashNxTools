@@ -19,6 +19,7 @@ namespace SmashNxTools
             ImportEntries(archive.Table28.EntryList);
             LinkNodes();
             PopulateStrings();
+            SetDisplayNames();
         }
 
         public void ValidateNames()
@@ -157,6 +158,20 @@ namespace SmashNxTools
                 }
             }
         }
+
+        private void SetDisplayNames()
+        {
+            foreach (FsNode node in EnumerateEntries())
+            {
+                if (node.NameHash == 0) node.DisplayNameText = "";
+
+                node.DisplayNameText = node.NameText ?? Program.GetHashText(node.NameHash);
+
+                node.DisplayPathText = node.PathText ?? $"{node.Parent.DisplayPathText}/{node.DisplayNameText}";
+
+                if (node.NameText == null && node.Type == EntryType.File) node.DisplayPathText += $"(*.{node.ExtensionText})";
+            }
+        }
     }
 
     [DebuggerDisplay("{Type}, {NameText}, {PathText}")]
@@ -184,6 +199,8 @@ namespace SmashNxTools
         public int ChildCount { get; set; }
         public int ChildFileCount { get; set; }
         public int ChildDirectoryCount { get; set; }
+        public string DisplayPathText { get; set; }
+        public string DisplayNameText { get; set; }
 
         public bool Validate()
         {
