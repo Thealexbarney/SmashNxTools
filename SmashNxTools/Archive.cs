@@ -226,11 +226,11 @@ namespace SmashNxTools
 
             try
             {
-                if (isLink) return;
+                //if (isLink) return;
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
 
-                //using (var fileOut = new FileStream(path, FileMode.Create, FileAccess.ReadWrite))
-                using (var fileOut = Stream.Null)
+                using (var fileOut = new FileStream(path, FileMode.Create, FileAccess.ReadWrite))
+                //using (var fileOut = Stream.Null)
                 {
                     Stream.Position = offset;
 
@@ -276,7 +276,7 @@ namespace SmashNxTools
             }
             catch (Exception)
             {
-                Console.WriteLine($"File index 0x{file.Index:x5}: Bad path {path}");
+                progress?.LogMessage($"File index 0x{file.Index:x5}: Bad path {path}");
                 try
                 {
                     File.Delete(path);
@@ -301,11 +301,12 @@ namespace SmashNxTools
 
             for (int i = 0; i < fileListTabs.Length; i++)
             {
-                ExtractFileIndex(i, outDir, progress, sb);
+                //ExtractFileIndex(i, outDir, progress, sb);
+                ExtractFileIndex(i, outDir, progress);
                 progress?.ReportAdd(1);
             }
 
-            File.WriteAllText("list2.csv", sb.ToString());
+            //File.WriteAllText("list2.csv", sb.ToString());
         }
 
         public IEnumerable<byte[]> EnumerateFiles(IProgressReport progress = null)

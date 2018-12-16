@@ -38,11 +38,11 @@ namespace SmashNxTools
                 //    archive.ExtractFile(args[1], "files", progress);
                 //}
 
-                //var tree = new FsTree(archive);
+                var tree = new FsTree(archive);
                 //var entries = tree.EnumerateEntries().Select(x => x.NameText).Where(x => x != null).Distinct().OrderBy(x => x).ToArray();
-                // var entries = tree.EnumerateEntries().Where(x => x.NameText == null).Select(x => x.DisplayPathText).ToArray();
+                 var entries = tree.EnumerateEntries().Select(x => x.DisplayPathText).ToArray();
                 // var unkHashes = tree.EnumerateEntries().Where(x => x.NameText == null).Select(x => x.NameHash).Distinct().OrderBy(x => x).Select(FsTree.GetHashText).ToArray();
-                //File.WriteAllLines("file list.txt", entries);
+                File.WriteAllLines("file list.txt", entries);
                 //File.WriteAllLines("unknown hashes.txt", unkHashes);
                 // tree.ValidateNames();
 
@@ -54,7 +54,7 @@ namespace SmashNxTools
 
                // LoadDump3("comparcstrings2.txt");
                 //LoadDump3("comparcstrings67.txt");
-                LoadDump3("dump.txt");
+                //LoadDump3("dump.txt");
                 // SearchTreeStrings(tree);
                 // GetDecimalFormatStrings();
                 //GetStringFormatStrings(archive);
