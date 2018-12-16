@@ -36,28 +36,49 @@ namespace SmashNxTools
             var reader = new BinaryReader(Stream);
 
             reader.BaseStream.Position = Header.Field20;
-            var header20 = new CompressedTableHeader(reader);
-            var table20 = new byte[header20.Size];
 
-            reader.BaseStream.Position = Header.Field28;
-            var header28 = new CompressedTableHeader(reader);
-            var table28 = new byte[header28.Size];
-
-            reader.BaseStream.Position = Header.Field20 + header20.DataOffset;
-
-            using (var compStream = new ZstandardStream(Stream, CompressionMode.Decompress, true))
+            if (reader.ReadInt32() < 0x100) // heuristic for detecting compressed tables
             {
-                compStream.Read(table20, 0, table20.Length);
+                reader.BaseStream.Position = Header.Field20;
+                var header20 = new CompressedTableHeader(reader);
+                var table20 = new byte[header20.Size];
+
+                reader.BaseStream.Position = Header.Field28;
+                var header28 = new CompressedTableHeader(reader);
+                var table28 = new byte[header28.Size];
+
+                reader.BaseStream.Position = Header.Field20 + header20.DataOffset;
+
+                using (var compStream = new ZstandardStream(Stream, CompressionMode.Decompress, true))
+                {
+                    compStream.Read(table20, 0, table20.Length);
+                }
+
+                reader.BaseStream.Position = Header.Field28 + header28.DataOffset;
+
+                using (var compStream = new ZstandardStream(Stream, CompressionMode.Decompress, true))
+                {
+                    compStream.Read(table28, 0, table28.Length);
+                }
+
+                return (table20, table28);
             }
-
-            reader.BaseStream.Position = Header.Field28 + header28.DataOffset;
-
-            using (var compStream = new ZstandardStream(Stream, CompressionMode.Decompress, true))
+            else
             {
-                compStream.Read(table28, 0, table28.Length);
-            }
+                reader.BaseStream.Position = Header.Field20;
+                int table20Length = reader.ReadInt32();
 
-            return (table20, table28);
+                reader.BaseStream.Position = Header.Field20;
+                byte[] table20 = reader.ReadBytes(table20Length);
+
+                reader.BaseStream.Position = Header.Field28;
+                int table28Length = reader.ReadInt32();
+
+                reader.BaseStream.Position = Header.Field28;
+                byte[] table28 = reader.ReadBytes(table28Length);
+
+                return (table20, table28);
+            }
         }
 
         public void FindFullHashes()
